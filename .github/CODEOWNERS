@@ -1,0 +1,5 @@
+# Everything is owned by the maintainer.
+#
+# This only requests a review. To require it, a ruleset on main must turn on "Require review from Code Owners".
+# GitHub never lets you approve your own pull request, so the maintainer should be a bypass actor on that ruleset.
+*   @jt-simon

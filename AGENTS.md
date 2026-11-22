@@ -13,7 +13,7 @@ swappable (raylib today). Read the **Hard rules** and **Before you finish** sect
 3. **Domain is pure:** no I/O, `Task`/threads/`lock`, `DateTime.Now`, unseeded `Random`, or engine types.
 4. **Never weaken a check to make it pass.** Do not delete, skip or loosen a test (including
    `DependencyTests`), add `#pragma warning disable`, `[SuppressMessage]` or `!`, or edit
-   `.editorconfig` / `Directory.*.props`. Fix the code instead.
+   `.editorconfig` / `Directory.*.props` / `.github/workflows`. Fix the code instead.
 5. **No new package, project or reference** without asking the user first.
 6. **Every public member in `src/` has an accurate XML doc comment.** When you change behavior (parameters,
    return value, exceptions, threading, ownership, units), update its comment and any `<see cref>` /
@@ -33,7 +33,8 @@ dotnet run --project src/Nerdcraft.Desktop               # needs a display
 ```
 
 `--ignore-exit-code 8` is needed on narrow runs because projects with no matching test otherwise fail.
-`--filter-class` also exists. Run the narrow test first, then the full suite.
+`--filter-class` also exists. Run the narrow test first, then the full suite. CI (`.github/workflows/ci.yml`)
+runs build, format check and tests, so all three must pass locally first.
 
 ## Where does this code go?
 
@@ -89,7 +90,7 @@ this behavior? (3) is it uncovered today?
   and the task did not clearly require it. If the task does require it, go ahead, but in the same change
   update every implementation and fake (for `IRenderer`: `RaylibRenderer` and `FakeRenderer`), document the
   new member's contract, and name the signature change in your final summary.
-- You would edit `Directory.*.props`, `.editorconfig`, `global.json` or `AGENTS.md`.
+- You would edit `Directory.*.props`, `.editorconfig`, `global.json`, `.github/` or `AGENTS.md`.
 - Any hard rule seems to block the task.
 
 ## Before you finish
