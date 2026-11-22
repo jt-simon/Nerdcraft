@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Nerdcraft.Domain\Nerdcraft.Domain.csproj" />
+  </ItemGroup>
+
+</Project>
