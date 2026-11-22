@@ -55,6 +55,7 @@ Adapters translate, they don't decide. Layer and threading detail: [docs/archite
 3. Decide about tests with the checklist below. Bug fix: write the failing test first.
 4. Build, then run the narrow test, then the full suite.
 5. Update docs affected by the change (XML comments, `docs/architecture.md` if layers or threading changed).
+   Add a `CHANGELOG.md` entry under `[Unreleased]` for user-visible changes.
 6. Stop. Do not "improve" nearby code.
 
 ## Do I need a test?
@@ -91,6 +92,7 @@ this behavior? (3) is it uncovered today?
   update every implementation and fake (for `IRenderer`: `RaylibRenderer` and `FakeRenderer`), document the
   new member's contract, and name the signature change in your final summary.
 - You would edit `Directory.*.props`, `.editorconfig`, `global.json`, `.github/` or `AGENTS.md`.
+- You would bump `<Version>` in `Directory.Build.props` or create a git tag. Releases are the maintainer's job.
 - Any hard rule seems to block the task.
 
 ## Before you finish
@@ -100,6 +102,7 @@ this behavior? (3) is it uncovered today?
 - [ ] `dotnet format --verify-no-changes Nerdcraft.slnx` exits 0.
 - [ ] No new package or project reference.
 - [ ] Every new or changed public member has an accurate XML doc comment.
+- [ ] User-visible changes have a `CHANGELOG.md` entry under `[Unreleased]`.
 - [ ] No unrelated files changed and no test weakened.
 
 ## Recipes

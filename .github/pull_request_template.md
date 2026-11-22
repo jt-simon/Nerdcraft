@@ -9,6 +9,7 @@
 - [ ] `dotnet format --verify-no-changes Nerdcraft.slnx` passes
 - [ ] No new package, project or reference (or I explained why above)
 - [ ] New or changed public members have accurate XML doc comments
+- [ ] `CHANGELOG.md` updated under `[Unreleased]` (or the change isn't user-visible)
 - [ ] Tests cover behavior that can actually break, and nothing was weakened to make a check pass
 
 The rules are in [AGENTS.md](../AGENTS.md). They apply to people and coding agents alike.
