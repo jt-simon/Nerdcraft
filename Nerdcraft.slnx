@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Nerdcraft.Application/Nerdcraft.Application.csproj" />
+    <Project Path="src/Nerdcraft.Desktop/Nerdcraft.Desktop.csproj" />
+    <Project Path="src/Nerdcraft.Domain/Nerdcraft.Domain.csproj" />
+    <Project Path="src/Nerdcraft.Rendering.Raylib/Nerdcraft.Rendering.Raylib.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Nerdcraft.Application.Tests/Nerdcraft.Application.Tests.csproj" />
+    <Project Path="tests/Nerdcraft.Domain.Tests/Nerdcraft.Domain.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Nerdcraft.Application\Nerdcraft.Application.csproj" />
+    <ProjectReference Include="..\Nerdcraft.Rendering.Raylib\Nerdcraft.Rendering.Raylib.csproj" />
+  </ItemGroup>
+
+</Project>
