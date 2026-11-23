@@ -3,6 +3,7 @@
 using System.Numerics;
 
 using Nerdcraft.Application.Rendering;
+using Nerdcraft.Application.Ui;
 
 namespace Nerdcraft.Application.Ports;
 
@@ -43,5 +44,9 @@ public interface IRenderer
     /// When set, draws the debug overlay (FPS, the camera position and the draw statistics); when
     /// <see langword="null"/>, draws no overlay.
     /// </param>
-    void EndFrame(DebugOverlay? debug);
+    /// <param name="menu">
+    /// When set, draws the pause menu last, over the scene and the overlay: the scene dimmed and each button at its
+    /// pixel bounds. When <see langword="null"/>, draws no menu.
+    /// </param>
+    void EndFrame(DebugOverlay? debug, PauseMenuView? menu);
 }
