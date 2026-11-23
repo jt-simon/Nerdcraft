@@ -27,6 +27,11 @@ public static class BlockPalette
             return new Color(88, 160, 62);
         }
 
+        if (block == BlockTypes.Bedrock)
+        {
+            return new Color(48, 48, 52);
+        }
+
         return Missing;
     }
 }

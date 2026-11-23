@@ -5,15 +5,32 @@ using Nerdcraft.Domain.Blocks;
 namespace Nerdcraft.Domain.World.Generation;
 
 /// <summary>
-/// Generates rolling terrain from two octaves of value noise: grass on the surface, a few layers of dirt
-/// beneath it, then stone. The same seed always yields the same world.
+/// Generates terrain from layered simplex noise: a continent layer sets the base height around sea level
+/// (Y = 0), a mountain mask decides how much relief an area gets, and hill noise adds the relief. Each
+/// column is grass on the surface, <c>DirtDepth</c> (3) layers of dirt, then stone, with bedrock on the
+/// bottom layer of the world. There is no water and no caves yet. The same seed and bounds always yield the same world.
 /// </summary>
-/// <param name="seed">Seed for the noise; different seeds give different terrain.</param>
-public sealed class HeightmapTerrainGenerator(int seed) : ITerrainGenerator
+public sealed class HeightmapTerrainGenerator : ITerrainGenerator
 {
-    private const int BaseHeight = 24;
-    private const int Amplitude = 20;
     private const int DirtDepth = 3;
+
+    private const int ContinentSeedOffset = 101;
+    private const int MountainSeedOffset = 202;
+    private const int HillSeedOffset = 303;
+
+    private readonly int _seed;
+    private readonly WorldBounds _bounds;
+
+    /// <summary>Creates a generator for one world.</summary>
+    /// <param name="seed">Seed for the noise; different seeds give different terrain.</param>
+    /// <param name="bounds">Vertical extent of the world; the bottom layer is bedrock and nothing generates outside it.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="bounds"/> has <c>MaxY</c> not above <c>MinY</c>.</exception>
+    public HeightmapTerrainGenerator(int seed, WorldBounds bounds)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(bounds.MaxY, bounds.MinY);
+        _seed = seed;
+        _bounds = bounds;
+    }
 
     /// <inheritdoc/>
     public void Generate(ChunkPosition position, Span<BlockId> blocks)
@@ -34,7 +51,13 @@ public sealed class HeightmapTerrainGenerator(int seed) : ITerrainGenerator
                         break;
                     }
 
-                    blocks[Chunk.Index(x, y, z)] = worldY == surface ? BlockTypes.Grass
+                    if (worldY < _bounds.MinY)
+                    {
+                        continue;
+                    }
+
+                    blocks[Chunk.Index(x, y, z)] = worldY == _bounds.MinY ? BlockTypes.Bedrock
+                        : worldY == surface ? BlockTypes.Grass
                         : worldY >= surface - DirtDepth ? BlockTypes.Dirt
                         : BlockTypes.Stone;
                 }
@@ -42,48 +65,32 @@ public sealed class HeightmapTerrainGenerator(int seed) : ITerrainGenerator
         }
     }
 
-    /// <summary>World Y of the topmost (grass) block in the column at the given world X and Z.</summary>
+    /// <summary>
+    /// World Y of the topmost (grass) block in the column at the given world X and Z, relative to sea level at Y = 0.
+    /// Always in [<c>MinY + 1</c>, <c>MaxY</c>] so bedrock stays below the surface.
+    /// </summary>
     public int SurfaceHeight(int worldX, int worldZ)
     {
-        float broad = ValueNoise(worldX / 48f, worldZ / 48f);
-        float detail = ValueNoise(worldX / 12f, worldZ / 12f);
-        float n = (broad * 0.75f) + (detail * 0.25f);
-        return BaseHeight + (int)(n * Amplitude);
+        // The noise only reaches about +/-0.7, so every range below is narrower than the full scale suggests.
+        // Continent: base height from about -15 (basins) to +7, before relief is added.
+        float continent = SimplexNoise.Fbm(_seed + ContinentSeedOffset, worldX / 1000f, worldZ / 1000f, 3);
+        float baseHeight = (continent * 16f) - 4f;
+
+        // Mountain mask: 0 on plains, 1 in mountain ranges.
+        float rawMask = (SimplexNoise.Fbm(_seed + MountainSeedOffset, worldX / 800f, worldZ / 800f, 2) + 1f) * 0.5f;
+        float mask = SmoothStep(0.35f, 0.75f, rawMask);
+
+        float hills = SimplexNoise.Fbm(_seed + HillSeedOffset, worldX / 300f, worldZ / 300f, 3);
+        // Relief is added on top of the base: up to about +/-4 on plains and +/-65 in mountain ranges.
+        float relief = hills * (6f + (mask * 90f));
+
+        int height = (int)MathF.Floor(baseHeight + relief);
+        return Math.Clamp(height, _bounds.MinY + 1, _bounds.MaxY);
     }
 
-    private float ValueNoise(float x, float z)
+    private static float SmoothStep(float edge0, float edge1, float x)
     {
-        int x0 = (int)MathF.Floor(x);
-        int z0 = (int)MathF.Floor(z);
-        float fx = Smooth(x - x0);
-        float fz = Smooth(z - z0);
-
-        float a = Hash(x0, z0);
-        float b = Hash(x0 + 1, z0);
-        float c = Hash(x0, z0 + 1);
-        float d = Hash(x0 + 1, z0 + 1);
-
-        float top = a + ((b - a) * fx);
-        float bottom = c + ((d - c) * fx);
-        return top + ((bottom - top) * fz);
-    }
-
-    private static float Smooth(float t) => t * t * (3f - (2f * t));
-
-    // Returns a value in [0, 1).
-    private float Hash(int x, int z)
-    {
-        unchecked
-        {
-            uint h = (uint)seed;
-            h ^= (uint)x * 0x9E3779B1u;
-            h = (h << 13) | (h >> 19);
-            h ^= (uint)z * 0x85EBCA77u;
-            h *= 0xC2B2AE3Du;
-            h ^= h >> 16;
-            h *= 0x27D4EB2Fu;
-            h ^= h >> 15;
-            return (h & 0xFFFFFF) / (float)0x1000000;
-        }
+        float t = Math.Clamp((x - edge0) / (edge1 - edge0), 0f, 1f);
+        return t * t * (3f - (2f * t));
     }
 }

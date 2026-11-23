@@ -16,4 +16,7 @@ public static class BlockTypes
 
     /// <summary>The top block of the terrain surface.</summary>
     public static readonly BlockId Grass = new(3);
+
+    /// <summary>Indestructible floor that fills the bottom layer of the world.</summary>
+    public static readonly BlockId Bedrock = new(4);
 }

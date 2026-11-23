@@ -8,6 +8,19 @@ contain breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- Procedural terrain from layered simplex noise (continents, mountain ranges and hills) around sea level at Y = 0.
+- World height range of Y = -50 to Y = 200, set by `GameSettings.Bounds`.
+- Bedrock block that always fills the bottom layer of the world.
+
+### Changed
+
+- `GameSettings.WorldHeightInChunks` is replaced by `GameSettings.Bounds`.
+- Default `GameSettings.RenderDistance` is now 12 chunks (was 6).
+- `HeightmapTerrainGenerator` now requires a `WorldBounds` argument in its constructor.
+- The camera starts 20 blocks above the terrain surface instead of at a fixed height. `NerdcraftGame`'s constructor takes an optional `spawnHeight`.
+
 ## [0.1.0] - 2026-11-22
 
 ### Added

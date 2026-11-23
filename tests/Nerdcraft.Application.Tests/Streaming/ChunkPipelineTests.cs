@@ -19,7 +19,7 @@ public class ChunkPipelineTests
     [Fact]
     public async Task Generate_ManyRequests_ReturnsEveryChunkOnce()
     {
-        await using ChunkPipeline pipeline = new(new HeightmapTerrainGenerator(5), new CulledChunkMesher(), workerCount: 3);
+        await using ChunkPipeline pipeline = new(new HeightmapTerrainGenerator(5, WorldBounds.Default), new CulledChunkMesher(), workerCount: 3);
         List<ChunkPosition> requested = [.. Enumerable.Range(0, 20).Select(i => new ChunkPosition(i, 1, -i))];
         foreach (ChunkPosition position in requested)
         {
@@ -46,7 +46,7 @@ public class ChunkPipelineTests
     {
         VoxelWorld world = TestWorlds.WithEmptyChunks(new ChunkPosition(0, 0, 0));
         world.SetBlock(new BlockPosition(1, 1, 1), BlockTypes.Stone);
-        await using ChunkPipeline pipeline = new(new HeightmapTerrainGenerator(5), new CulledChunkMesher(), workerCount: 1);
+        await using ChunkPipeline pipeline = new(new HeightmapTerrainGenerator(5, WorldBounds.Default), new CulledChunkMesher(), workerCount: 1);
         ChunkSnapshot snapshot = ChunkSnapshot.Create(world, new ChunkPosition(0, 0, 0));
         int version = snapshot.Version;
 
@@ -117,7 +117,7 @@ public class ChunkPipelineTests
     [Fact]
     public async Task DisposeAsync_CalledTwice_DoesNotThrow()
     {
-        ChunkPipeline pipeline = new(new HeightmapTerrainGenerator(5), new CulledChunkMesher(), workerCount: 1);
+        ChunkPipeline pipeline = new(new HeightmapTerrainGenerator(5, WorldBounds.Default), new CulledChunkMesher(), workerCount: 1);
 
         await pipeline.DisposeAsync();
         await pipeline.DisposeAsync();

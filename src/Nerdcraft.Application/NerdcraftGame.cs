@@ -21,6 +21,9 @@ public sealed class NerdcraftGame : IAsyncDisposable
 {
     private static readonly Color SkyColor = new(135, 190, 235);
 
+    // Blocks between the terrain surface and the camera at the spawn column.
+    private const int SpawnClearance = 20;
+
     private readonly GameSettings _settings;
     private readonly FlyCamera _camera;
     private readonly ChunkStreamer _streamer;
@@ -31,24 +34,29 @@ public sealed class NerdcraftGame : IAsyncDisposable
     /// <param name="settings">Configuration for streaming and the camera.</param>
     /// <param name="workQueue">Background worker port used for terrain generation and meshing.</param>
     /// <param name="world">The world to populate and draw.</param>
+    /// <param name="spawnHeight">World Y at which the camera starts, above the block column at X = 8, Z = 8. Must clear the terrain there.</param>
     /// <exception cref="ArgumentOutOfRangeException">A value in <paramref name="settings"/> is out of range.</exception>
-    public NerdcraftGame(GameSettings settings, IChunkWorkQueue workQueue, VoxelWorld world)
+    public NerdcraftGame(GameSettings settings, IChunkWorkQueue workQueue, VoxelWorld world, float spawnHeight = 56f)
     {
         settings.Validate();
         _settings = settings;
         _workQueue = workQueue as IAsyncDisposable;
         _streamer = new ChunkStreamer(world, workQueue, settings);
-        _camera = new FlyCamera(new Vector3(8f, 56f, 8f), yawDegrees: 0f, pitchDegrees: -25f);
+        _camera = new FlyCamera(new Vector3(8f, spawnHeight, 8f), yawDegrees: 0f, pitchDegrees: -25f);
         _farPlane = (settings.RenderDistance + 1) * Chunk.Size * 1.5f;
     }
 
-    /// <summary>Creates a game with the default wiring: heightmap terrain, culled meshing, and a threaded <see cref="ChunkPipeline"/>.</summary>
+    /// <summary>
+    /// Creates a game with the default wiring: heightmap terrain, culled meshing, and a threaded <see cref="ChunkPipeline"/>.
+    /// The camera starts 20 blocks above the terrain surface at X = 8, Z = 8.
+    /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">A value in <paramref name="settings"/> is out of range.</exception>
     public static NerdcraftGame Create(GameSettings settings)
     {
         settings.Validate();
-        ChunkPipeline pipeline = new(new HeightmapTerrainGenerator(settings.Seed), new CulledChunkMesher(), settings.WorkerCount);
-        return new NerdcraftGame(settings, pipeline, new VoxelWorld());
+        HeightmapTerrainGenerator generator = new(settings.Seed, settings.Bounds);
+        ChunkPipeline pipeline = new(generator, new CulledChunkMesher(), settings.WorkerCount);
+        return new NerdcraftGame(settings, pipeline, new VoxelWorld(), generator.SurfaceHeight(8, 8) + SpawnClearance);
     }
 
     /// <summary>Advances the camera by <paramref name="deltaSeconds"/> and requests any chunks it now needs. Does not touch the renderer.</summary>

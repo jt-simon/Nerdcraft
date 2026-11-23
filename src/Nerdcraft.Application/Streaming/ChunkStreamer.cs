@@ -18,7 +18,7 @@ namespace Nerdcraft.Application.Streaming;
 /// </summary>
 /// <param name="world">The world to fill with generated chunks.</param>
 /// <param name="queue">Source of background generation and meshing.</param>
-/// <param name="settings">Supplies render distance, world height and the per-frame upload budget.</param>
+/// <param name="settings">Supplies render distance, world bounds and the per-frame upload budget.</param>
 public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameSettings settings)
 {
     private readonly Dictionary<ChunkPosition, Entry> _entries = [];
@@ -152,7 +152,7 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
     {
         foreach ((int dx, int dz) in _loadOffsets)
         {
-            for (int y = 0; y < settings.WorldHeightInChunks; y++)
+            for (int y = settings.Bounds.MinChunkY; y <= settings.Bounds.MaxChunkY; y++)
             {
                 ChunkPosition position = new(cameraX + dx, y, cameraZ + dz);
 
@@ -197,8 +197,8 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
                 _ => position.Offset(0, 0, 1),
             };
 
-            bool wanted = neighbor.Y >= 0
-                && neighbor.Y < settings.WorldHeightInChunks
+            bool wanted = neighbor.Y >= settings.Bounds.MinChunkY
+                && neighbor.Y <= settings.Bounds.MaxChunkY
                 && DistanceSquared(neighbor.X - cameraX, neighbor.Z - cameraZ)
                     <= settings.RenderDistance * settings.RenderDistance;
 
