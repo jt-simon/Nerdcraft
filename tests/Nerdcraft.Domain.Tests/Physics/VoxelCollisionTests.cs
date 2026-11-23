@@ -61,6 +61,25 @@ public class VoxelCollisionTests
         Assert.Equal(0.2f, allowed.Z, 3);
     }
 
+    [Theory]
+    [InlineData(499998.37f, 1f, 2.5f, 1f, 0f, 0f)]
+    [InlineData(500001.63f, 1f, 2.5f, -1f, 0f, 0f)]
+    [InlineData(500000.5f, 1f, 0.37f, 0f, 0f, 1f)]
+    [InlineData(500000.5f, -0.93f, 2.5f, 0f, 1f, 0f)]
+    public void Collides_BoxStoppedByMoveAtLargeX_ReportsNoCollision(float x, float y, float z, float dx, float dy, float dz)
+    {
+        BlockPosition block = new(500000, 1, 2);
+        VoxelWorld world = TestTerrain.Empty(block.ChunkPosition, block.ChunkPosition.Offset(-1, 0, 0));
+        world.SetBlock(block, BlockTypes.Stone);
+        Aabb box = PlayerState.Spawn(new Vector3(x, y, z)).Bounds;
+
+        Vector3 wanted = new Vector3(dx, dy, dz) * 5f;
+        Vector3 allowed = VoxelCollision.Move(world, TestTerrain.Bounds, box, wanted);
+
+        Assert.True(allowed.Length() < wanted.Length());
+        Assert.False(VoxelCollision.Collides(world, TestTerrain.Bounds, box.Offset(allowed)));
+    }
+
     [Fact]
     public void Move_FallOntoFloor_StopsOnTopFace()
     {

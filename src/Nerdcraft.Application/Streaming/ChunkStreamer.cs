@@ -75,13 +75,16 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
     }
 
     /// <summary>
-    /// Uploads up to <see cref="GameSettings.MaxUploadsPerFrame"/> individual meshes, with a separate limit on
-    /// releases and result processing. A chunk's opaque and translucent handles become visible together once both
+    /// Uploads up to <see cref="GameSettings.MaxUploadsPerFrame"/> individual meshes. Takes at most
+    /// <see cref="GameSettings.MaxMeshRequestsPerFrame"/> + <see cref="GameSettings.MaxUploadsPerFrame"/> finished results,
+    /// counting discarded stale ones, and releases at most twice <see cref="GameSettings.MaxUploadsPerFrame"/> old meshes. A chunk's opaque and translucent handles become visible together once both
     /// are ready. Meshes built from outdated chunk contents are discarded.
     /// </summary>
     public void UploadCompleted(IRenderer renderer)
     {
         int uploads = 0;
+        // Bounds results examined per frame, stale ones included. No more than one frame's requests plus one frame's
+        // uploads can be useful, so this drains the queue at the rate it fills without a dedicated setting.
         long remainingResults = (long)settings.MaxMeshRequestsPerFrame + settings.MaxUploadsPerFrame;
         while (uploads < settings.MaxUploadsPerFrame && remainingResults-- > 0)
         {

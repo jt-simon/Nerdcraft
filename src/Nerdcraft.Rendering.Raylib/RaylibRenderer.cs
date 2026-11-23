@@ -18,7 +18,8 @@ namespace Nerdcraft.Rendering.Raylib;
 public sealed unsafe class RaylibRenderer : IRenderer, IDisposable
 {
     private static readonly Meter Metrics = new("Nerdcraft.Raylib");
-    private static readonly Histogram<long> UploadBytes = Metrics.CreateHistogram<long>("nerdcraft.mesh.upload.bytes", "By");
+    private static readonly Histogram<long> UploadBytes = Metrics.CreateHistogram<long>(
+        "nerdcraft.mesh.upload.bytes", "By", "Vertex positions, colors and indices sent to the GPU; normals are not uploaded");
 
     private readonly Dictionary<int, Mesh> _meshes = [];
     private readonly Material _material = Raylib_cs.Raylib.LoadMaterialDefault();

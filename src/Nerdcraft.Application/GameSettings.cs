@@ -32,7 +32,8 @@ public sealed record GameSettings
 
     /// <summary>
     /// Meshing requests started per frame. Each copies a chunk and its borders on the main thread before a worker meshes
-    /// it, so starting hundreds in one frame would stall it; the rest wait for the next. At least 1.
+    /// it, so starting hundreds in one frame would stall it; the rest wait for the next. Together with <see cref="MaxUploadsPerFrame"/>
+    /// it also caps the finished meshes taken per frame, including stale ones that are discarded. At least 1.
     /// </summary>
     public int MaxMeshRequestsPerFrame { get; init; } = 16;
 

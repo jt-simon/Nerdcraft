@@ -42,6 +42,7 @@ contain breaking changes.
 
 - Esc no longer quits the game directly; use the pause menu's Quit.
 - `IRenderer.EndFrame` now takes a `PauseMenuView?` to draw the pause menu.
+- `ChunkPipeline`'s constructor takes the `WorldBounds`, which size its outstanding-generation limit.
 - World-owned chunks are exposed as read-only views. Block edits go through `VoxelWorld.SetBlock` so streaming sees every change.
 - Streaming bounds outstanding results and budgets individual mesh uploads, including water. Mixed chunks appear after both uploads are ready, and stale results and mesh releases are spread across frames.
 - Meshing allocates material buffers on demand, the debug mesh count is computed only when displayed, and Raylib batches depth-write changes across the water pass.

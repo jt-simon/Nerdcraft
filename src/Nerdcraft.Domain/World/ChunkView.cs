@@ -8,6 +8,7 @@ namespace Nerdcraft.Domain.World;
 /// Read-only access to a live chunk on the world's owning thread. Obtain an initialized view
 /// from a successful <see cref="VoxelWorld.TryGetChunk"/> call.
 /// </summary>
+/// <remarks>A default instance has no chunk; its members throw.</remarks>
 public readonly struct ChunkView
 {
     private readonly Chunk _chunk;

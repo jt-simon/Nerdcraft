@@ -67,7 +67,7 @@ public sealed class NerdcraftGame : IAsyncDisposable
     {
         settings.Validate();
         HeightmapTerrainGenerator generator = new(settings.Seed, settings.Bounds);
-        ChunkPipeline pipeline = new(generator, new CulledChunkMesher(), settings.WorkerCount);
+        ChunkPipeline pipeline = new(generator, new CulledChunkMesher(), settings.WorkerCount, settings.Bounds);
         return new NerdcraftGame(settings, pipeline, new VoxelWorld(), Math.Max(generator.SurfaceHeight(8, 8), HeightmapTerrainGenerator.SeaLevel) + 1);
     }
 

@@ -47,17 +47,17 @@ public sealed class ChunkPipeline : IChunkWorkQueue, IAsyncDisposable
     /// <param name="generator">Produces blocks for generate requests; called from worker threads.</param>
     /// <param name="mesher">Meshes snapshots for mesh requests; called from worker threads.</param>
     /// <param name="workerCount">Number of background worker tasks.</param>
+    /// <param name="bounds">The world's vertical extent; sets how many generated rows may be outstanding at once.</param>
     /// <param name="queueCapacity">
     /// Maximum requests waiting for a worker. Together with the worker count it sets independent limits for outstanding
     /// meshes and generated rows. Further requests are refused until space frees up.
     /// </param>
-    public ChunkPipeline(ITerrainGenerator generator, IChunkMesher mesher, int workerCount, int queueCapacity = 32)
+    public ChunkPipeline(ITerrainGenerator generator, IChunkMesher mesher, int workerCount, WorldBounds bounds, int queueCapacity = 32)
     {
         _generator = generator;
         _mesher = mesher;
         _meshedCapacity = (long)queueCapacity + workerCount;
-        WorldBounds defaults = WorldBounds.Default;
-        _generatedCapacity = _meshedCapacity * (defaults.MaxChunkY - defaults.MinChunkY + 1);
+        _generatedCapacity = _meshedCapacity * (bounds.MaxChunkY - bounds.MinChunkY + 1);
         _requests = Channel.CreateBounded<ChunkJob>(new BoundedChannelOptions(queueCapacity)
         {
             FullMode = BoundedChannelFullMode.Wait,
@@ -78,7 +78,7 @@ public sealed class ChunkPipeline : IChunkWorkQueue, IAsyncDisposable
         ArgumentOutOfRangeException.ThrowIfLessThan(maxChunkY, minChunkY);
         long rows = (long)maxChunkY - minChunkY + 1;
         ArgumentOutOfRangeException.ThrowIfGreaterThan(rows, Array.MaxLength / Chunk.Volume, nameof(maxChunkY));
-        // A taller custom world can still generate one column when no other generation is outstanding.
+        // A column taller than the configured bounds can still generate when nothing else is outstanding.
         if ((_outstandingGeneratedRows != 0 && rows > _generatedCapacity - _outstandingGeneratedRows)
             || !_requests.Writer.TryWrite(new ChunkJob(new ChunkPosition(chunkX, minChunkY, chunkZ), null, maxChunkY)))
         {
@@ -229,6 +229,7 @@ public sealed class ChunkPipeline : IChunkWorkQueue, IAsyncDisposable
 
     private void ThrowIfFaulted() => Volatile.Read(ref _fault)?.Throw();
 
+    // CPU MeshData footprint: positions, normals, colors and indices.
     private static int MeshPayloadBytes(MeshData mesh)
         => (mesh.VertexCount * ((6 * sizeof(float)) + 4)) + (mesh.IndexCount * sizeof(ushort));
 
