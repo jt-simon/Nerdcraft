@@ -15,7 +15,7 @@ Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download).
 dotnet run --project src/Nerdcraft.Desktop
 ```
 
-WASD move, Space jump (swim up, fly up), Shift sneak (swim down, fly down), double-tap W sprint, F toggle flight, N toggle noclip, mouse look, F3 debug overlay, Esc quit.
+WASD move, Space jump (swim up, fly up), Shift sneak (swim down, fly down), double-tap W sprint, F toggle flight, N toggle noclip, mouse look, F3 debug overlay, Esc pause menu (Resume / Quit, frees the mouse), F11 maximize.
 
 ## License
 

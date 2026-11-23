@@ -4,6 +4,7 @@ using System.Numerics;
 
 using Nerdcraft.Application.Ports;
 using Nerdcraft.Application.Rendering;
+using Nerdcraft.Application.Ui;
 
 namespace Nerdcraft.Application.Tests.Support;
 
@@ -28,6 +29,9 @@ public sealed class FakeRenderer : IRenderer
     /// <summary>Overlay passed to each <see cref="EndFrame"/>; null when the debug overlay was hidden.</summary>
     public List<DebugOverlay?> DebugOverlays { get; } = [];
 
+    /// <summary>Pause menu passed to each <see cref="EndFrame"/>; null when the menu was hidden.</summary>
+    public List<PauseMenuView?> Menus { get; } = [];
+
     public List<MeshHandle> TranslucentDraws { get; } = [];
 
     /// <summary>Every draw call in submission order; true marks a translucent draw.</summary>
@@ -43,9 +47,10 @@ public sealed class FakeRenderer : IRenderer
 
     public void ReleaseMesh(MeshHandle handle) => Releases.Add(handle);
 
-    public void BeginFrame(CameraView camera, Color clearColor)
-    {
-    }
+    /// <summary>Direction the camera looked in at each <see cref="BeginFrame"/>.</summary>
+    public List<Vector3> CameraForwards { get; } = [];
+
+    public void BeginFrame(CameraView camera, Color clearColor) => CameraForwards.Add(Vector3.Normalize(camera.Target - camera.Position));
 
     public void DrawMesh(MeshHandle handle, Matrix4x4 transform)
     {
@@ -60,5 +65,9 @@ public sealed class FakeRenderer : IRenderer
         AllDraws.Add((handle, true));
     }
 
-    public void EndFrame(DebugOverlay? debug) => DebugOverlays.Add(debug);
+    public void EndFrame(DebugOverlay? debug, PauseMenuView? menu)
+    {
+        DebugOverlays.Add(debug);
+        Menus.Add(menu);
+    }
 }
