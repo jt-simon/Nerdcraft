@@ -29,8 +29,8 @@ its own `Color`, so no engine types leak inward.
 - **CPU-heavy work runs on workers.** `ChunkPipeline` generates terrain and meshes chunks on up to 4 tasks
   fed by a bounded `Channel`. Results return on channels and are drained by the main thread.
 - **Workers never see live chunk data.** Meshing runs on a pooled `ChunkSnapshot` (the chunk plus a
-  one-block border from its neighbors). Each chunk has a `Version`; a mesh built from an outdated
-  version is discarded and rebuilt.
+  one-block border from all 26 neighbors, so ambient occlusion works across chunk edges and corners).
+  Each chunk has a `Version`; a mesh built from an outdated version is discarded and rebuilt.
 - **Per-frame work is bounded.** At most `GameSettings.MaxUploadsPerFrame` meshes are uploaded per frame,
   chunks outside the camera frustum aren't drawn, and buffers are pooled to keep the GC quiet.
 - `async`/`await` is used for worker loops and shutdown only; the per-frame path is synchronous.

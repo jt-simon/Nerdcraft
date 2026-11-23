@@ -14,6 +14,7 @@ contain breaking changes.
 - World height range of Y = -50 to Y = 200, set by `GameSettings.Bounds`.
 - Bedrock block that always fills the bottom layer of the world.
 - `Chunk.IsEmpty`, which reports whether a chunk holds only air.
+- Ambient occlusion: block faces darken in corners and creases, including across chunk borders.
 
 ### Changed
 

@@ -216,26 +216,25 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
     // Meshing before in-range neighbors exist would draw faces that get hidden a moment later, then mesh twice.
     private bool NeighborsSettled(ChunkPosition position, int cameraX, int cameraZ)
     {
-        for (int face = 0; face < 6; face++)
+        // All 26 neighbors matter: the mesher's ambient occlusion reads across edges and corners too.
+        for (int dy = -1; dy <= 1; dy++)
         {
-            ChunkPosition neighbor = face switch
+            for (int dz = -1; dz <= 1; dz++)
             {
-                0 => position.Offset(-1, 0, 0),
-                1 => position.Offset(1, 0, 0),
-                2 => position.Offset(0, -1, 0),
-                3 => position.Offset(0, 1, 0),
-                4 => position.Offset(0, 0, -1),
-                _ => position.Offset(0, 0, 1),
-            };
+                for (int dx = -1; dx <= 1; dx++)
+                {
+                    ChunkPosition neighbor = position.Offset(dx, dy, dz);
+                    bool wanted = (dx | dy | dz) != 0
+                        && neighbor.Y >= settings.Bounds.MinChunkY
+                        && neighbor.Y <= settings.Bounds.MaxChunkY
+                        && DistanceSquared(neighbor.X - cameraX, neighbor.Z - cameraZ)
+                            <= settings.RenderDistance * settings.RenderDistance;
 
-            bool wanted = neighbor.Y >= settings.Bounds.MinChunkY
-                && neighbor.Y <= settings.Bounds.MaxChunkY
-                && DistanceSquared(neighbor.X - cameraX, neighbor.Z - cameraZ)
-                    <= settings.RenderDistance * settings.RenderDistance;
-
-            if (wanted && !(_entries.TryGetValue(neighbor, out Entry? other) && other.Loaded))
-            {
-                return false;
+                    if (wanted && !(_entries.TryGetValue(neighbor, out Entry? other) && other.Loaded))
+                    {
+                        return false;
+                    }
+                }
             }
         }
 

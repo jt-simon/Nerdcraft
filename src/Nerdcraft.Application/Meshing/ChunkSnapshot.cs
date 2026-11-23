@@ -8,18 +8,17 @@ using Nerdcraft.Domain.World;
 namespace Nerdcraft.Application.Meshing;
 
 /// <summary>
-/// A private copy of a chunk plus a one-block border taken from its six face neighbors, so a worker
-/// thread can mesh it without touching live world data. Dispose to return the pooled buffer.
+/// A private copy of a chunk plus a one-block border taken from its 26 neighbors (faces, edges and corners),
+/// so a worker thread can mesh it, including ambient occlusion, without touching live world data. Dispose to
+/// return the pooled buffer.
 /// </summary>
 public sealed class ChunkSnapshot : IDisposable
 {
     /// <summary>Edge length of the padded block volume: the chunk plus one border block on each side.</summary>
     public const int PaddedSize = Chunk.Size + 2;
 
-    private static readonly (int Dx, int Dy, int Dz)[] FaceDirections =
-    [
-        (-1, 0, 0), (1, 0, 0), (0, -1, 0), (0, 1, 0), (0, 0, -1), (0, 0, 1),
-    ];
+    // Every offset in {-1, 0, 1}^3 except (0, 0, 0): 6 face, 12 edge and 8 corner neighbors.
+    private static readonly (int Dx, int Dy, int Dz)[] NeighborDirections = BuildNeighborDirections();
 
     private BlockId[]? _blocks;
 
@@ -42,7 +41,7 @@ public sealed class ChunkSnapshot : IDisposable
     /// <summary>Index for coordinates in [-1, Chunk.Size], where -1 and Chunk.Size are the border.</summary>
     public static int Index(int x, int y, int z) => ((((y + 1) * PaddedSize) + (z + 1)) * PaddedSize) + (x + 1);
 
-    /// <summary>Copies a loaded chunk and its face-neighbor borders into a pooled buffer. Unloaded neighbors read as air.</summary>
+    /// <summary>Copies a loaded chunk and its borders from all 26 neighbors into a pooled buffer. Unloaded neighbors read as air.</summary>
     /// <exception cref="InvalidOperationException">The chunk at <paramref name="position"/> is not loaded.</exception>
     public static ChunkSnapshot Create(VoxelWorld world, ChunkPosition position)
     {
@@ -62,8 +61,8 @@ public sealed class ChunkSnapshot : IDisposable
             }
         }
 
-        // Edges and corners of the padding are never read: face culling only looks at face neighbors.
-        foreach ((int dx, int dy, int dz) in FaceDirections)
+        // Face culling reads only face neighbors, but ambient occlusion also reads the padding's edges and corners.
+        foreach ((int dx, int dy, int dz) in NeighborDirections)
         {
             world.TryGetChunk(position.Offset(dx, dy, dz), out Chunk? neighbor);
             CopyBorder(blocks, neighbor, dx, dy, dz);
@@ -82,25 +81,55 @@ public sealed class ChunkSnapshot : IDisposable
         }
     }
 
+    // Fills the padded cells that belong to the neighbor at offset (dx, dy, dz): a whole face (16 x 16 cells), an
+    // edge (16 cells) or a corner (1 cell). Every cell is written, so stale pooled data never leaks through.
     private static void CopyBorder(BlockId[] blocks, Chunk? neighbor, int dx, int dy, int dz)
     {
-        for (int u = 0; u < Chunk.Size; u++)
+        (int x0, int x1) = AxisRange(dx);
+        (int y0, int y1) = AxisRange(dy);
+        (int z0, int z1) = AxisRange(dz);
+
+        for (int y = y0; y <= y1; y++)
         {
-            for (int v = 0; v < Chunk.Size; v++)
+            for (int z = z0; z <= z1; z++)
             {
-                // (x, y, z) is the edge cell inside this chunk; the border cell sits one step further out.
-                int x = dx != 0 ? (dx < 0 ? 0 : Chunk.Mask) : u;
-                int y = dy != 0 ? (dy < 0 ? 0 : Chunk.Mask) : (dx != 0 ? u : v);
-                int z = dz != 0 ? (dz < 0 ? 0 : Chunk.Mask) : v;
-
-                BlockId block = BlockId.Air;
-                if (neighbor is not null)
+                for (int x = x0; x <= x1; x++)
                 {
-                    block = neighbor.Blocks[Chunk.Index(x - (dx * Chunk.Mask), y - (dy * Chunk.Mask), z - (dz * Chunk.Mask))];
+                    // The padded cell sits one step outside this chunk; the same cell in the neighbor is Size blocks back.
+                    BlockId block = neighbor is null
+                        ? BlockId.Air
+                        : neighbor.Blocks[Chunk.Index(x - (dx * Chunk.Size), y - (dy * Chunk.Size), z - (dz * Chunk.Size))];
+                    blocks[Index(x, y, z)] = block;
                 }
-
-                blocks[Index(x + dx, y + dy, z + dz)] = block;
             }
         }
+    }
+
+    // The padded coordinates a neighbor at this offset along one axis covers: the border cell on its side, or the whole chunk.
+    private static (int First, int Last) AxisRange(int offset) => offset switch
+    {
+        < 0 => (-1, -1),
+        > 0 => (Chunk.Size, Chunk.Size),
+        _ => (0, Chunk.Size - 1),
+    };
+
+    private static (int Dx, int Dy, int Dz)[] BuildNeighborDirections()
+    {
+        List<(int Dx, int Dy, int Dz)> directions = [];
+        for (int dy = -1; dy <= 1; dy++)
+        {
+            for (int dz = -1; dz <= 1; dz++)
+            {
+                for (int dx = -1; dx <= 1; dx++)
+                {
+                    if ((dx | dy | dz) != 0)
+                    {
+                        directions.Add((dx, dy, dz));
+                    }
+                }
+            }
+        }
+
+        return [.. directions];
     }
 }
