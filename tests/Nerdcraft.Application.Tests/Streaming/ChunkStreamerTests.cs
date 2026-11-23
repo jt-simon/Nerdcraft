@@ -18,6 +18,8 @@ public class ChunkStreamerTests
 
     private static readonly Vector3 Camera = new(8f, 4f, 8f);
 
+    private static readonly Vector3 SliceCamera = new(8f, 12f, 8f);
+
     private readonly VoxelWorld _world = new();
     private readonly FakeRenderer _renderer = new();
     private readonly ChunkStreamer _streamer;
@@ -275,11 +277,15 @@ public class ChunkStreamerTests
         Frustum towardWorld = FrustumFrom(new Vector3(8, 40, 8), new Vector3(8, 0, 8), Vector3.UnitZ * -1);
         Frustum awayFromWorld = FrustumFrom(new Vector3(8, 40, 8), new Vector3(8, 80, 8), Vector3.UnitZ * -1);
 
-        _streamer.Draw(_renderer, awayFromWorld, Vector3.Zero);
+        DrawStats away = _streamer.Draw(_renderer, awayFromWorld, Vector3.Zero);
         Assert.Empty(_renderer.Draws);
+        Assert.Equal(new DrawStats(0, ChunksInWorld, 0), away);
 
-        _streamer.Draw(_renderer, towardWorld, Vector3.Zero);
+        DrawStats toward = _streamer.Draw(_renderer, towardWorld, Vector3.Zero);
         Assert.NotEmpty(_renderer.Draws);
+        Assert.Equal(_renderer.Draws.Count, toward.ChunksDrawn);
+        Assert.Equal(ChunksInWorld, toward.ChunksMeshed);
+        Assert.Equal(_renderer.Draws.Sum(handle => (long)_renderer.VertexCounts[handle]), toward.VerticesDrawn);
     }
 
     [Fact]
@@ -295,6 +301,39 @@ public class ChunkStreamerTests
         Assert.All(renderer.AllDraws.Skip(firstTranslucent), draw => Assert.True(draw.Translucent));
         MeshHandle nearestWater = renderer.Uploads[1]; // Chunk (0,0,0) uploads first: its opaque mesh, then its water.
         Assert.Equal((nearestWater, true), renderer.AllDraws[^1]);
+    }
+
+    [Fact]
+    public void Draw_ChunkBehindSolidChunk_IsCulled()
+    {
+        (ChunkStreamer streamer, FakeRenderer renderer) = SliceStreamer(BlockTypes.Stone);
+
+        streamer.Draw(renderer, LookingAlongX(), SliceCamera);
+
+        Assert.Contains(new Vector3(Chunk.Size, 0, 0), renderer.DrawOrigins);
+        Assert.DoesNotContain(new Vector3(2 * Chunk.Size, 0, 0), renderer.DrawOrigins);
+    }
+
+    [Fact]
+    public void Draw_ChunkBehindEmptyChunk_IsDrawn()
+    {
+        (ChunkStreamer streamer, FakeRenderer renderer) = SliceStreamer(BlockTypes.Air);
+
+        streamer.Draw(renderer, LookingAlongX(), SliceCamera);
+
+        Assert.Contains(new Vector3(2 * Chunk.Size, 0, 0), renderer.DrawOrigins);
+    }
+
+    [Fact]
+    public void Draw_CameraOutsideEveryChunk_FallsBackToFrustumOnly()
+    {
+        (ChunkStreamer streamer, FakeRenderer renderer) = SliceStreamer(BlockTypes.Stone);
+        Vector3 aboveWorld = new(8, 100, 8);
+        Frustum lookingDown = FrustumFrom(aboveWorld, new Vector3(8, 0, 8), Vector3.UnitZ * -1);
+
+        streamer.Draw(renderer, lookingDown, aboveWorld);
+
+        Assert.Contains(new Vector3(2 * Chunk.Size, 0, 0), renderer.DrawOrigins);
     }
 
     [Fact]
@@ -320,6 +359,24 @@ public class ChunkStreamerTests
 
         return (streamer, renderer);
     }
+
+    // A streamer over a world with a slice of the given block at chunk X = 1, which is a wall across it. The camera
+    // sits in the open air of chunk (0,0,0); with radius 2 the only chunk beyond the slice is (2,0,0).
+    private static (ChunkStreamer Streamer, FakeRenderer Renderer) SliceStreamer(BlockId sliceBlock)
+    {
+        GameSettings settings = new() { RenderDistance = 2, Bounds = new WorldBounds(0, Chunk.Size - 1), MaxUploadsPerFrame = 100 };
+        FakeRenderer renderer = new();
+        ChunkStreamer streamer = new(new VoxelWorld(), new InlineChunkWorkQueue(new XSliceGenerator(1, sliceBlock), new CulledChunkMesher()), settings);
+        for (int frame = 0; frame < 6; frame++)
+        {
+            streamer.Update(SliceCamera);
+            streamer.UploadCompleted(renderer);
+        }
+
+        return (streamer, renderer);
+    }
+
+    private static Frustum LookingAlongX() => FrustumFrom(SliceCamera, SliceCamera + new Vector3(100, 0, 0), Vector3.UnitY);
 
     // Enough frames for generation, then meshing, then upload to complete with the inline queue.
     private void Settle()

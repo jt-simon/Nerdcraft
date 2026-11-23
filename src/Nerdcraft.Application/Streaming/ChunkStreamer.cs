@@ -21,9 +21,15 @@ namespace Nerdcraft.Application.Streaming;
 /// <param name="settings">Supplies render distance, world bounds and the per-frame budgets for uploads, chunk installs and mesh requests.</param>
 public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameSettings settings)
 {
+    // Chunk neighbor offsets in ChunkFace order; face ^ 1 is the opposite direction.
+    private static readonly (int Dx, int Dy, int Dz)[] FaceDirections = [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)];
+
     private readonly Dictionary<ChunkPosition, Entry> _entries = [];
     private readonly List<MeshHandle> _pendingRelease = [];
     private readonly List<TranslucentDraw> _translucentScratch = [];
+    private readonly List<(ChunkPosition Position, Entry Entry)> _visibleScratch = [];
+    private readonly Queue<WalkStep> _walkQueue = new();
+    private int _drawFrame;
     private readonly List<ChunkPosition> _unloadScratch = [];
     private readonly (int Dx, int Dz)[] _loadOffsets = BuildLoadOffsets(settings.RenderDistance);
     private (int X, int Z)? _lastCameraChunk;
@@ -96,23 +102,28 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
             {
                 renderer.ReleaseMesh(old);
                 entry.Handle = null;
+                entry.VertexCount = 0;
             }
 
             if (entry.TranslucentHandle is { } oldTranslucent)
             {
                 renderer.ReleaseMesh(oldTranslucent);
                 entry.TranslucentHandle = null;
+                entry.TranslucentVertexCount = 0;
             }
 
             entry.MeshedVersion = result.Version;
+            entry.Visibility = mesh.Visibility; // Even for a chunk with no faces: solid rock still hides what is behind it.
             if (mesh.Opaque.VertexCount > 0)
             {
                 entry.Handle = renderer.UploadMesh(mesh.Opaque);
+                entry.VertexCount = mesh.Opaque.VertexCount;
             }
 
             if (mesh.Translucent.VertexCount > 0)
             {
                 entry.TranslucentHandle = renderer.UploadMesh(mesh.Translucent);
+                entry.TranslucentVertexCount = mesh.Translucent.VertexCount;
             }
 
             if (entry.Handle is not null || entry.TranslucentHandle is not null)
@@ -123,27 +134,44 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
     }
 
     /// <summary>
-    /// Draws every uploaded chunk mesh that intersects <paramref name="frustum"/>, translated to its world position:
-    /// all opaque meshes first, then the translucent ones from the farthest chunk to the nearest.
+    /// Draws the uploaded chunk meshes that intersect <paramref name="frustum"/> and are not hidden behind solid
+    /// terrain, translated to their world positions: all opaque meshes first, then the translucent ones from the
+    /// farthest chunk to the nearest. Chunks are reached by walking outward from the camera's chunk through the
+    /// faces each chunk's <see cref="ChunkVisibility"/> connects, so a chunk behind solid rock is skipped. When
+    /// the camera is not inside a loaded chunk, only the frustum decides.
     /// </summary>
     /// <param name="renderer">Receives the draw calls.</param>
     /// <param name="frustum">The view volume; chunks outside it are skipped.</param>
-    /// <param name="cameraPosition">Camera position in world space, used to order the translucent meshes.</param>
-    public void Draw(IRenderer renderer, Frustum frustum, Vector3 cameraPosition)
+    /// <param name="cameraPosition">Camera position in world space; starts the visibility walk and orders the translucent meshes.</param>
+    /// <returns>How many chunks and vertices were drawn, and how many chunks hold a mesh.</returns>
+    public DrawStats Draw(IRenderer renderer, Frustum frustum, Vector3 cameraPosition)
     {
         _translucentScratch.Clear();
-        foreach ((ChunkPosition position, Entry entry) in _entries)
+        _visibleScratch.Clear();
+        int meshed = 0;
+        foreach (Entry entry in _entries.Values)
         {
-            if (entry.Handle is null && entry.TranslucentHandle is null)
+            if (entry.HasMesh)
             {
-                continue;
+                meshed++;
             }
+        }
 
-            Vector3 min = new(position.X * Chunk.Size, position.Y * Chunk.Size, position.Z * Chunk.Size);
-            if (!frustum.Intersects(min, min + new Vector3(Chunk.Size)))
-            {
-                continue;
-            }
+        ChunkPosition cameraChunk = new(FloorToChunk(cameraPosition.X), FloorToChunk(cameraPosition.Y), FloorToChunk(cameraPosition.Z));
+        if (_entries.TryGetValue(cameraChunk, out Entry? start))
+        {
+            CollectVisible(frustum, cameraChunk, start);
+        }
+        else
+        {
+            CollectInFrustum(frustum);
+        }
+
+        long vertices = 0;
+        foreach ((ChunkPosition position, Entry entry) in _visibleScratch)
+        {
+            Vector3 min = ChunkMin(position);
+            vertices += entry.VertexCount + entry.TranslucentVertexCount;
 
             if (entry.Handle is { } handle)
             {
@@ -162,6 +190,85 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
         {
             renderer.DrawTranslucentMesh(draw.Handle, Matrix4x4.CreateTranslation(draw.Min));
         }
+
+        return new DrawStats(_visibleScratch.Count, meshed, vertices);
+    }
+
+    private static Vector3 ChunkMin(ChunkPosition position) => new(position.X * Chunk.Size, position.Y * Chunk.Size, position.Z * Chunk.Size);
+
+    // Fallback without a starting chunk: every meshed chunk inside the frustum.
+    private void CollectInFrustum(Frustum frustum)
+    {
+        foreach ((ChunkPosition position, Entry entry) in _entries)
+        {
+            Vector3 min = ChunkMin(position);
+            if (entry.HasMesh && frustum.Intersects(min, min + new Vector3(Chunk.Size)))
+            {
+                _visibleScratch.Add((position, entry));
+            }
+        }
+    }
+
+    // Breadth-first walk from the camera's chunk, so near chunks come first. A step leaves a chunk through a face only
+    // if open space joins that face to the one it was entered through. Each chunk is entered at most once per face
+    // per frame, which keeps the walk bounded without letting a dead-end path hide a chunk another path reaches.
+    private void CollectVisible(Frustum frustum, ChunkPosition cameraChunk, Entry start)
+    {
+        _drawFrame++;
+        _walkQueue.Clear();
+
+        // The walk always starts here, but the camera's own chunk is drawn only if it is in view like any other.
+        Vector3 startMin = ChunkMin(cameraChunk);
+        Visit(cameraChunk, start, -1, frustum.Intersects(startMin, startMin + new Vector3(Chunk.Size)));
+
+        while (_walkQueue.TryDequeue(out WalkStep step))
+        {
+            for (int exit = 0; exit < FaceDirections.Length; exit++)
+            {
+                if (exit == step.EnteredFace
+                    || (step.EnteredFace >= 0 && !step.Entry.Visibility.Connects((ChunkFace)step.EnteredFace, (ChunkFace)exit)))
+                {
+                    continue;
+                }
+
+                (int dx, int dy, int dz) = FaceDirections[exit];
+                ChunkPosition next = step.Position.Offset(dx, dy, dz);
+                int entered = exit ^ 1;
+                if (!_entries.TryGetValue(next, out Entry? entry)
+                    || (entry.VisitFrame == _drawFrame && (entry.VisitedFaces & (1 << entered)) != 0))
+                {
+                    continue;
+                }
+
+                Vector3 min = ChunkMin(next);
+                if (frustum.Intersects(min, min + new Vector3(Chunk.Size)))
+                {
+                    Visit(next, entry, entered, inView: true);
+                }
+            }
+        }
+    }
+
+    // Records that the walk reached the chunk through enteredFace (-1 for the camera's own chunk) and queues it.
+    // The chunk is queued for drawing on its first visit of the frame, if it has a mesh and is in view.
+    private void Visit(ChunkPosition position, Entry entry, int enteredFace, bool inView)
+    {
+        if (entry.VisitFrame != _drawFrame)
+        {
+            entry.VisitFrame = _drawFrame;
+            entry.VisitedFaces = 0;
+            if (inView && entry.HasMesh)
+            {
+                _visibleScratch.Add((position, entry));
+            }
+        }
+
+        if (enteredFace >= 0)
+        {
+            entry.VisitedFaces |= 1 << enteredFace;
+        }
+
+        _walkQueue.Enqueue(new WalkStep(position, entry, enteredFace));
     }
 
     private void UnloadDistantChunks(int cameraX, int cameraZ)
@@ -271,6 +378,7 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
         {
             ReleaseLater(entry);
             entry.MeshedVersion = chunk.Version;
+            entry.Visibility = ChunkVisibility.All; // All air: nothing blocks the view.
         }
 
         return true;
@@ -283,12 +391,14 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
         {
             _pendingRelease.Add(handle);
             entry.Handle = null;
+            entry.VertexCount = 0;
         }
 
         if (entry.TranslucentHandle is { } translucent)
         {
             _pendingRelease.Add(translucent);
             entry.TranslucentHandle = null;
+            entry.TranslucentVertexCount = 0;
         }
     }
 
@@ -371,7 +481,24 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
         public MeshHandle? Handle { get; set; }
 
         public MeshHandle? TranslucentHandle { get; set; }
+
+        // Vertex counts of the uploaded meshes, for DrawStats; 0 while the matching handle is null.
+        public int VertexCount { get; set; }
+
+        public int TranslucentVertexCount { get; set; }
+
+        // Which faces the chunk's open space joins, from its last mesh. All until meshed, so an unknown chunk never hides others.
+        public ChunkVisibility Visibility { get; set; } = ChunkVisibility.All;
+
+        // Bookkeeping for the visibility walk in Draw: the frame it last reached this chunk and the faces it entered through.
+        public int VisitFrame { get; set; }
+
+        public int VisitedFaces { get; set; }
+
+        public bool HasMesh => Handle is not null || TranslucentHandle is not null;
     }
+
+    private readonly record struct WalkStep(ChunkPosition Position, Entry Entry, int EnteredFace);
 
     private readonly record struct TranslucentDraw(MeshHandle Handle, Vector3 Min, float DistanceSquared);
 }

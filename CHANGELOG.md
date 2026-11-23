@@ -17,6 +17,8 @@ contain breaking changes.
 - Ambient occlusion: block faces darken in corners and creases, including across chunk borders.
 - Caves: large caverns and winding tunnels carved from 3D noise, sealed below the surface except for occasional openings. The layers just above bedrock are never carved.
 - F3 toggles a debug overlay showing FPS and the camera position.
+- The F3 overlay also shows chunks drawn / meshed and the vertices drawn per frame (`DebugOverlay`, `DrawStats`).
+- Cave culling: chunks hidden behind solid terrain are no longer drawn. Each chunk records which of its faces are joined by open space (`ChunkVisibility`), and `ChunkStreamer.Draw` walks outward from the camera's chunk through those connections.
 
 - Translucent water fills the terrain up to sea level (`HeightmapTerrainGenerator.SeaLevel`, Y = 0).
 - Surface materials by height: gravel on the deep seabed, sand on the shallow seabed and beaches, grass over dirt in between, bare stone on high ground and snow on the peaks. Band edges are shifted by noise so they wander. New block types `Sand`, `Gravel`, `Snow` and `Water`.
@@ -26,7 +28,8 @@ contain breaking changes.
 
 ### Changed
 
-- `IRenderer.EndFrame` now takes an optional camera position and draws the debug overlay when it is set; `RaylibRenderer.ShowFps` is removed.
+- `IRenderer.EndFrame` now takes an optional `DebugOverlay` (camera position plus `DrawStats`) and draws the debug overlay when it is set (`RaylibRenderer.ShowFps` is removed); `ChunkStreamer.Draw` returns the `DrawStats`.
+- `ChunkMesh` gains a `Visibility` member, and `IChunkMesher.Mesh` must set it.
 - `IChunkMesher.Mesh` returns a `ChunkMesh` (opaque and translucent meshes) instead of a `MeshData`, and `MeshedChunk.Mesh` has the same type.
 - `ChunkStreamer.Draw` takes the camera position, to draw translucent meshes from farthest to nearest.
 - Every seed generates a different world than before, and caves no longer open into the seabed.

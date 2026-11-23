@@ -7,7 +7,8 @@ namespace Nerdcraft.Application.Meshing;
 /// <summary>The meshes of one chunk, split by how they are drawn. Owns both; dispose to return their pooled storage.</summary>
 /// <param name="Opaque">Faces of opaque blocks. May be empty.</param>
 /// <param name="Translucent">Faces of translucent blocks such as water, drawn after all opaque meshes. May be empty.</param>
-public sealed record ChunkMesh(MeshData Opaque, MeshData Translucent) : IDisposable
+/// <param name="Visibility">Which faces of the chunk are joined by open space, so the renderer can skip chunks hidden behind it. Meaningful even when both meshes are empty.</param>
+public sealed record ChunkMesh(MeshData Opaque, MeshData Translucent, ChunkVisibility Visibility) : IDisposable
 {
     /// <summary>Disposes both meshes.</summary>
     public void Dispose()
