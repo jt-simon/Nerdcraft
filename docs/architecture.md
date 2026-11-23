@@ -14,7 +14,7 @@ Nerdcraft.Desktop            composition root (the only place a renderer meets t
        -> Nerdcraft.Domain        blocks, chunks, world, terrain generation (no dependencies)
 ```
 
-- **Domain**: `VoxelWorld`, `Chunk`, `BlockId`, `ITerrainGenerator`. Pure C#, no I/O.
+- **Domain**: `VoxelWorld`, `Chunk`, `BlockId`, `WorldBounds`, `ITerrainGenerator`. Pure C#, no I/O.
 - **Application**: `NerdcraftGame` (the host calls `Update` then `Render` each frame), `IRenderer` (the
   port every graphics backend implements), meshing, chunk streaming, camera, `InputState`.
 - **Rendering.Raylib**: implements `IRenderer`, reads raylib input into `InputState`.

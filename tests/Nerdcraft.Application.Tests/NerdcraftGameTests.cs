@@ -12,7 +12,7 @@ public class NerdcraftGameTests
     public static TheoryData<string> InvalidSettingNames =>
     [
         nameof(GameSettings.RenderDistance),
-        nameof(GameSettings.WorldHeightInChunks),
+        nameof(GameSettings.Bounds),
         nameof(GameSettings.WorkerCount),
         nameof(GameSettings.MaxUploadsPerFrame),
         nameof(GameSettings.FovYDegrees),
@@ -43,7 +43,7 @@ public class NerdcraftGameTests
     private static GameSettings Invalid(string settingName) => settingName switch
     {
         nameof(GameSettings.RenderDistance) => new GameSettings { RenderDistance = -1 },
-        nameof(GameSettings.WorldHeightInChunks) => new GameSettings { WorldHeightInChunks = 0 },
+        nameof(GameSettings.Bounds) => new GameSettings { Bounds = new WorldBounds(10, 5) },
         nameof(GameSettings.WorkerCount) => new GameSettings { WorkerCount = 0 },
         nameof(GameSettings.MaxUploadsPerFrame) => new GameSettings { MaxUploadsPerFrame = 0 },
         nameof(GameSettings.FovYDegrees) => new GameSettings { FovYDegrees = 180f },

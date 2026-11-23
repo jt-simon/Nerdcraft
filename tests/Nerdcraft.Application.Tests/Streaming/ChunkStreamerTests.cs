@@ -25,7 +25,7 @@ public class ChunkStreamerTests
 
     public ChunkStreamerTests()
     {
-        _settings = new GameSettings { RenderDistance = 1, WorldHeightInChunks = 1, MaxUploadsPerFrame = 100 };
+        _settings = new GameSettings { RenderDistance = 1, Bounds = new WorldBounds(0, Chunk.Size - 1), MaxUploadsPerFrame = 100 };
         InlineChunkWorkQueue queue = new(new HalfSlabGenerator(), new CulledChunkMesher());
         _streamer = new ChunkStreamer(_world, queue, _settings);
     }
@@ -40,6 +40,22 @@ public class ChunkStreamerTests
         Assert.True(_world.IsLoaded(new ChunkPosition(0, 0, -1)));
         Assert.False(_world.IsLoaded(new ChunkPosition(1, 0, 1))); // Corner lies outside the circular radius.
         Assert.False(_world.IsLoaded(new ChunkPosition(2, 0, 0)));
+    }
+
+    [Fact]
+    public void Update_BoundsBelowZero_LoadsNegativeChunkRows()
+    {
+        GameSettings settings = new() { RenderDistance = 0, Bounds = new WorldBounds(-Chunk.Size, Chunk.Size - 1), MaxUploadsPerFrame = 100 };
+        VoxelWorld world = new();
+        ChunkStreamer streamer = new(world, new InlineChunkWorkQueue(new HalfSlabGenerator(), new CulledChunkMesher()), settings);
+
+        streamer.Update(Camera); // Requests generation; the next update installs the results.
+        streamer.Update(Camera);
+
+        Assert.True(world.IsLoaded(new ChunkPosition(0, -1, 0)));
+        Assert.True(world.IsLoaded(new ChunkPosition(0, 0, 0)));
+        Assert.False(world.IsLoaded(new ChunkPosition(0, 1, 0)));
+        Assert.False(world.IsLoaded(new ChunkPosition(0, -2, 0)));
     }
 
     [Fact]
