@@ -51,7 +51,8 @@ public sealed class CulledChunkMesher : IChunkMesher
             {
                 for (int x = 0; x < Chunk.Size; x++)
                 {
-                    BlockId block = blocks[ChunkSnapshot.Index(x, y, z)];
+                    int index = ChunkSnapshot.Index(x, y, z);
+                    BlockId block = blocks[index];
                     if (block.IsAir)
                     {
                         continue;
@@ -62,7 +63,7 @@ public sealed class CulledChunkMesher : IChunkMesher
                     MeshBuilder builder = isTranslucent ? translucent : opaque;
                     foreach (Face face in Faces)
                     {
-                        BlockId neighbor = blocks[ChunkSnapshot.Index(x + face.Dx, y + face.Dy, z + face.Dz)];
+                        BlockId neighbor = blocks[index + face.NeighborOffset];
                         if (!neighbor.IsAir && (isTranslucent || !BlockPalette.IsTranslucent(neighbor)))
                         {
                             continue;
@@ -70,7 +71,7 @@ public sealed class CulledChunkMesher : IChunkMesher
 
                         for (int corner = 0; corner < 4; corner++)
                         {
-                            ao[corner] = OcclusionLevel(blocks, x, y, z, face, corner);
+                            ao[corner] = OcclusionLevel(blocks, index, face, corner);
                         }
 
                         if (!builder.TryAddQuad(x, y, z, face, color, ao))
@@ -88,20 +89,12 @@ public sealed class CulledChunkMesher : IChunkMesher
     // Ambient occlusion for one corner of a face. In the layer just outside the face, the two blocks beside the
     // corner (along the face's two tangent axes) and the block diagonal to it decide how crowded it is.
     // Returns 0 (darkest) to 3 (open).
-    private static int OcclusionLevel(ReadOnlySpan<BlockId> blocks, int x, int y, int z, Face face, int corner)
+    private static int OcclusionLevel(ReadOnlySpan<BlockId> blocks, int index, Face face, int corner)
     {
-        // +1 when this corner lies on the positive side of the face along each tangent axis, otherwise -1.
-        int signU = (face.Corners[(corner * 3) + face.UAxis] * 2) - 1;
-        int signV = (face.Corners[(corner * 3) + face.VAxis] * 2) - 1;
-        (int ux, int uy, int uz) = AxisStep(face.UAxis, signU);
-        (int vx, int vy, int vz) = AxisStep(face.VAxis, signV);
-
-        int bx = x + face.Dx;
-        int by = y + face.Dy;
-        int bz = z + face.Dz;
-        bool sideU = Occludes(blocks[ChunkSnapshot.Index(bx + ux, by + uy, bz + uz)]);
-        bool sideV = Occludes(blocks[ChunkSnapshot.Index(bx + vx, by + vy, bz + vz)]);
-        bool diagonal = Occludes(blocks[ChunkSnapshot.Index(bx + ux + vx, by + uy + vy, bz + uz + vz)]);
+        int offsets = corner * 3;
+        bool sideU = Occludes(blocks[index + face.OcclusionOffsets[offsets]]);
+        bool sideV = Occludes(blocks[index + face.OcclusionOffsets[offsets + 1]]);
+        bool diagonal = Occludes(blocks[index + face.OcclusionOffsets[offsets + 2]]);
 
         if (sideU && sideV)
         {
@@ -126,6 +119,33 @@ public sealed class CulledChunkMesher : IChunkMesher
         public int UAxis => Dx != 0 ? 1 : 0;
 
         public int VAxis => Dz != 0 ? 1 : 2;
+
+        // Steps in a snapshot's block array: from a block to its neighbor across this face.
+        public int NeighborOffset { get; } = Step(Dx, Dy, Dz);
+
+        // For each corner, the steps from a block to the three blocks that crowd it: beside it along U, beside it
+        // along V, and the diagonal. Three entries per corner, in that order.
+        public int[] OcclusionOffsets { get; } = BuildOcclusionOffsets(Dx, Dy, Dz, Corners);
+
+        private static int Step(int dx, int dy, int dz) => ChunkSnapshot.Index(dx, dy, dz) - ChunkSnapshot.Index(0, 0, 0);
+
+        private static int[] BuildOcclusionOffsets(int dx, int dy, int dz, int[] corners)
+        {
+            int uAxis = dx != 0 ? 1 : 0;
+            int vAxis = dz != 0 ? 1 : 2;
+            int[] offsets = new int[12];
+            for (int corner = 0; corner < 4; corner++)
+            {
+                // +1 when this corner lies on the positive side of the face along each tangent axis, otherwise -1.
+                (int ux, int uy, int uz) = AxisStep(uAxis, (corners[(corner * 3) + uAxis] * 2) - 1);
+                (int vx, int vy, int vz) = AxisStep(vAxis, (corners[(corner * 3) + vAxis] * 2) - 1);
+                offsets[corner * 3] = Step(dx + ux, dy + uy, dz + uz);
+                offsets[(corner * 3) + 1] = Step(dx + vx, dy + vy, dz + vz);
+                offsets[(corner * 3) + 2] = Step(dx + ux + vx, dy + uy + vy, dz + uz + vz);
+            }
+
+            return offsets;
+        }
     }
 
     private sealed class MeshBuilder : IDisposable

@@ -39,6 +39,7 @@ contain breaking changes.
 - Terrain now sits higher: about 30% of columns are below sea level (Y = 0), down from about two-thirds, so a future ocean covers a minority of the map.
 - Terrain is generated a whole column at a time, so the heightmap is computed once per column instead of once per chunk, which is about 2x faster. `IChunkWorkQueue.TryRequestGenerate` is replaced by `TryRequestGenerateColumn`, and `ITerrainGenerator` gains `GenerateColumn` (the default implementation calls `Generate` per chunk).
 - The chunk streamer skips its per-frame scan of every chunk in range unless the camera crossed a chunk border, the world changed, or a mesh request finished or was refused.
+- Meshing is about 20% faster: the ambient occlusion lookups for each face corner use precomputed offsets. The meshes are unchanged.
 
 ## [0.1.0] - 2026-11-22
 
