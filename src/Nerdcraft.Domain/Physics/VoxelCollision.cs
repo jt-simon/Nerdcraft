@@ -14,11 +14,9 @@ namespace Nerdcraft.Domain.Physics;
 /// </summary>
 public static class VoxelCollision
 {
-    // Touching is not overlapping; the tolerance absorbs float error when a box rests against a block face. Float
-    // spacing grows with distance from the origin, so the tolerance does too, or far from spawn a box left a few
-    // float steps inside a wall by rounding would count as already inside it and walk through.
+    // Movement treats a face left a few float steps inside a wall by rounding as still touching it. Float
+    // spacing grows with distance from the origin, independently on each axis.
     private const float MinimumTolerance = 1e-5f;
-    private const float RelativeTolerance = 1e-6f;
 
     /// <summary>
     /// Clips a movement so <paramref name="box"/> stops against solid blocks. Axes are resolved Y, then X, then Z,
@@ -57,14 +55,23 @@ public static class VoxelCollision
     private static bool AnyBlock<TBlocks>(Aabb box, TBlocks blocks)
         where TBlocks : struct, IBlockTest
     {
-        float tolerance = ToleranceAt(box);
-        for (int y = Floor(box.Min.Y + tolerance); y <= Floor(box.Max.Y - tolerance); y++)
+        if (box.Min.X >= box.Max.X || box.Min.Y >= box.Max.Y || box.Min.Z >= box.Max.Z)
         {
-            for (int z = Floor(box.Min.Z + tolerance); z <= Floor(box.Max.Z - tolerance); z++)
+            return false;
+        }
+
+        // The maximum face is exclusive. Taking the ceiling before subtracting preserves sub-block
+        // overlap without including a block that only touches the box.
+        int lastX = (int)(Math.Ceiling(box.Max.X) - 1);
+        int lastY = (int)(Math.Ceiling(box.Max.Y) - 1);
+        int lastZ = (int)(Math.Ceiling(box.Max.Z) - 1);
+        for (long y = Floor(box.Min.Y); y <= lastY; y++)
+        {
+            for (long z = Floor(box.Min.Z); z <= lastZ; z++)
             {
-                for (int x = Floor(box.Min.X + tolerance); x <= Floor(box.Max.X - tolerance); x++)
+                for (long x = Floor(box.Min.X); x <= lastX; x++)
                 {
-                    if (blocks.Matches(x, y, z))
+                    if (blocks.Matches((int)x, (int)y, (int)z))
                     {
                         return true;
                     }
@@ -83,7 +90,8 @@ public static class VoxelCollision
             return 0f;
         }
 
-        float tolerance = ToleranceAt(box);
+        Vector3 minTolerance = ContactTolerance(box.Min);
+        Vector3 maxTolerance = ContactTolerance(box.Max);
         int otherA = (axis + 1) % 3;
         int otherB = (axis + 2) % 3;
         for (int y = min.Y; y <= max.Y; y++)
@@ -100,18 +108,18 @@ public static class VoxelCollision
                     Vector3 blockMin = new(x, y, z);
                     Vector3 blockMax = blockMin + Vector3.One;
                     bool overlapsOthers =
-                        box.Max[otherA] > blockMin[otherA] + tolerance && box.Min[otherA] < blockMax[otherA] - tolerance
-                        && box.Max[otherB] > blockMin[otherB] + tolerance && box.Min[otherB] < blockMax[otherB] - tolerance;
+                        box.Max[otherA] > blockMin[otherA] + maxTolerance[otherA] && box.Min[otherA] < blockMax[otherA] - minTolerance[otherA]
+                        && box.Max[otherB] > blockMin[otherB] + maxTolerance[otherB] && box.Min[otherB] < blockMax[otherB] - minTolerance[otherB];
                     if (!overlapsOthers)
                     {
                         continue;
                     }
 
-                    if (d > 0f && box.Max[axis] <= blockMin[axis] + tolerance)
+                    if (d > 0f && box.Max[axis] <= blockMin[axis] + maxTolerance[axis])
                     {
                         d = Math.Min(d, Math.Max(0f, blockMin[axis] - box.Max[axis]));
                     }
-                    else if (d < 0f && box.Min[axis] >= blockMax[axis] - tolerance)
+                    else if (d < 0f && box.Min[axis] >= blockMax[axis] - minTolerance[axis])
                     {
                         d = Math.Max(d, Math.Min(0f, blockMax[axis] - box.Min[axis]));
                     }
@@ -131,15 +139,17 @@ public static class VoxelCollision
             return false;
         }
 
-        return !world.TryGetChunk(chunkPosition, out Chunk chunk)
+        return !world.TryGetChunk(chunkPosition, out ChunkView chunk)
             || BlockTypes.IsSolid(chunk.Get(position.LocalX, position.LocalY, position.LocalZ));
     }
 
-    private static float ToleranceAt(Aabb box)
+    private static Vector3 ContactTolerance(Vector3 point)
+        => new(ContactTolerance(point.X), ContactTolerance(point.Y), ContactTolerance(point.Z));
+
+    private static float ContactTolerance(float coordinate)
     {
-        Vector3 farthest = Vector3.Max(Vector3.Abs(box.Min), Vector3.Abs(box.Max));
-        float magnitude = MathF.Max(farthest.X, MathF.Max(farthest.Y, farthest.Z));
-        return MathF.Max(MinimumTolerance, magnitude * RelativeTolerance);
+        float magnitude = MathF.Abs(coordinate);
+        return MathF.Max(MinimumTolerance, 2f * (MathF.BitIncrement(magnitude) - magnitude));
     }
 
     private static int Floor(float value) => (int)MathF.Floor(value);

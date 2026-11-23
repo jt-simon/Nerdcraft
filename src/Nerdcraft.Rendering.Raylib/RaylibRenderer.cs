@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+using System.Diagnostics.Metrics;
 using System.Numerics;
 
 using Nerdcraft.Application.Ports;
@@ -15,9 +16,13 @@ namespace Nerdcraft.Rendering.Raylib;
 /// <summary>Draws with raylib. Must be created and used on the thread that owns the window.</summary>
 public sealed unsafe class RaylibRenderer : IRenderer, IDisposable
 {
+    private static readonly Meter Metrics = new("Nerdcraft.Raylib");
+    private static readonly Histogram<long> UploadBytes = Metrics.CreateHistogram<long>("nerdcraft.mesh.upload.bytes", "By");
+
     private readonly Dictionary<int, Mesh> _meshes = [];
     private readonly Material _material = Raylib_cs.Raylib.LoadMaterialDefault();
     private int _nextId;
+    private bool _drawingTranslucent;
 
     /// <inheritdoc/>
     public float AspectRatio
@@ -48,6 +53,7 @@ public sealed unsafe class RaylibRenderer : IRenderer, IDisposable
 
         int id = ++_nextId;
         _meshes[id] = mesh;
+        UploadBytes.Record(((long)data.VertexCount * ((3 * sizeof(float)) + 4)) + ((long)data.IndexCount * sizeof(ushort)));
         return new MeshHandle(id);
     }
 
@@ -71,19 +77,38 @@ public sealed unsafe class RaylibRenderer : IRenderer, IDisposable
     }
 
     /// <inheritdoc/>
-    // System.Numerics is row-major (translation in M41..M43); raylib expects column-major.
     public void DrawMesh(MeshHandle handle, Matrix4x4 transform)
-        => Raylib_cs.Raylib.DrawMesh(_meshes[handle.Id], _material, Matrix4x4.Transpose(transform));
+    {
+        EndTranslucentPass();
+        DrawNativeMesh(handle, transform);
+    }
 
     /// <inheritdoc/>
-    /// <remarks>Flushes the batch and turns depth writes off around the draw, so opaque meshes still occlude it.</remarks>
+    /// <remarks>Disables depth writes across consecutive translucent draws and restores them for opaque drawing or frame end.</remarks>
     public void DrawTranslucentMesh(MeshHandle handle, Matrix4x4 transform)
     {
-        Rlgl.DrawRenderBatchActive();
-        Rlgl.DisableDepthMask();
-        DrawMesh(handle, transform);
-        Rlgl.DrawRenderBatchActive();
-        Rlgl.EnableDepthMask();
+        if (!_drawingTranslucent)
+        {
+            Rlgl.DrawRenderBatchActive();
+            Rlgl.DisableDepthMask();
+            _drawingTranslucent = true;
+        }
+
+        DrawNativeMesh(handle, transform);
+    }
+
+    // System.Numerics is row-major (translation in M41..M43); raylib expects column-major.
+    private void DrawNativeMesh(MeshHandle handle, Matrix4x4 transform)
+        => Raylib_cs.Raylib.DrawMesh(_meshes[handle.Id], _material, Matrix4x4.Transpose(transform));
+
+    private void EndTranslucentPass()
+    {
+        if (_drawingTranslucent)
+        {
+            Rlgl.DrawRenderBatchActive();
+            Rlgl.EnableDepthMask();
+            _drawingTranslucent = false;
+        }
     }
 
     /// <inheritdoc/>
@@ -93,6 +118,7 @@ public sealed unsafe class RaylibRenderer : IRenderer, IDisposable
     /// </remarks>
     public void EndFrame(DebugOverlay? debug)
     {
+        EndTranslucentPass();
         Raylib_cs.Raylib.EndMode3D();
         if (debug is { } overlay)
         {

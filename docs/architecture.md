@@ -55,17 +55,35 @@ The rules live in Domain so a future server can run exactly the code a client do
   thread that calls it. Background workers never touch the renderer.
 - **CPU-heavy work runs on workers.** `ChunkPipeline` generates terrain and meshes chunks on up to 4 tasks
   fed by a bounded `Channel`. Terrain is generated a whole column (every chunk row at one X and Z) per job,
-  so the heightmap is computed once per column rather than once per chunk. Results return on channels and are drained by the main thread.
+  so the heightmap is computed once per column. Admission also limits outstanding generation rows and meshes,
+  including completed results waiting on the main thread. Shutdown stops workers before returning buffers and
+  snapshots left in the channels.
 - **Workers never see live chunk data.** Meshing runs on a pooled `ChunkSnapshot` (the chunk plus a
   one-block border from all 26 neighbors, so ambient occlusion works across chunk edges and corners).
-  Each chunk has a `Version`; a mesh built from an outdated version is discarded and rebuilt.
-- **Per-frame work is bounded.** Each frame installs at most `GameSettings.MaxChunkInstallsPerFrame` generated
-  chunks, starts at most `MaxMeshRequestsPerFrame` mesh requests and uploads at most `MaxUploadsPerFrame` meshes;
-  the rest wait for the next frame. Chunks outside the camera frustum or hidden behind solid terrain aren't drawn, and buffers are pooled to keep
-  the GC quiet.
+  Each chunk has a `Version`. World-owned chunks are exposed through read-only views, and the world controls
+  invalidation when chunks are loaded, unloaded, or edited. A mesh built from an outdated version is discarded
+  and rebuilt. A dirty chunk can still draw its previous mesh, with open visibility for the culling walk.
+- **Per-frame streaming work is bounded.** Each frame processes up to `GameSettings.MaxChunkInstallsPerFrame`
+  generated results, starts up to `MaxMeshRequestsPerFrame` mesh requests, and makes up to `MaxUploadsPerFrame`
+  native mesh uploads. The release limit is twice the upload budget. The result-processing limit is the sum of
+  the mesh request and upload budgets, including stale and empty results. A mixed chunk may stage an opaque
+  upload across frames and publishes both materials together.
+  The streamer releases superseded staged handles on the render thread and disposes staged CPU results at shutdown.
+  The Desktop host disposes the renderer and window on the graphics thread before awaiting worker shutdown.
 - `async`/`await` is used for worker loops and shutdown only; the per-frame path is synchronous.
 
 `GameSettings.RenderDistance` is the main knob for weak hardware.
+
+For performance captures, subscribe to the `Nerdcraft.Streaming` and `Nerdcraft.Raylib` .NET meters. Frame duration
+is measured between consecutive `Update` calls and includes presentation in the Desktop loop. The upload phase
+includes release processing, which also has its own duration and call-count metrics. Raylib reports uploaded bytes
+per upload call. Queue metrics cover results awaiting consumption.
+
+For integrated-GPU comparisons, use a Release desktop build and record the GPU, driver, CPU, resolution, seed,
+render distance, and presentation settings. Repeat the same settled view with the overlay off, turn over water,
+and flight into new terrain before and after each change. Report cold and warm results separately, including median,
+p95, and p99 frame times and the share of frames over 16.67 ms. Capture CPU phase times, upload bytes, draw and release
+counts, result queue depth and age, and GPU time when available.
 
 ## Third-party code
 

@@ -206,6 +206,127 @@ public class ChunkStreamerTests
         Assert.Equal(ChunksInWorld, _renderer.Uploads.Count);
     }
 
+    [Fact]
+    public void UploadCompleted_MixedMeshWithOneUploadPerFrame_EventuallyDrawsBothMaterials()
+    {
+        ChunkStreamer streamer = new(
+            _world,
+            new InlineChunkWorkQueue(new FloodedSlabGenerator(), new CulledChunkMesher()),
+            _settings with { RenderDistance = 0, MaxUploadsPerFrame = 1 });
+        Frustum towardWorld = FrustumFrom(new Vector3(8, 40, 8), new Vector3(8, 0, 8), -Vector3.UnitZ);
+        streamer.Update(Camera);
+        streamer.Update(Camera);
+
+        streamer.UploadCompleted(_renderer);
+        Assert.Single(_renderer.Uploads);
+        streamer.Draw(_renderer, towardWorld, Camera);
+        Assert.Empty(_renderer.AllDraws);
+
+        streamer.UploadCompleted(_renderer);
+        streamer.Draw(_renderer, towardWorld, Camera);
+        Assert.Equal(new[] { (_renderer.Uploads[0], false), (_renderer.Uploads[1], true) }, _renderer.AllDraws);
+    }
+
+    [Fact]
+    public void UploadCompleted_BurstOfEvictions_SpreadsReleasesAcrossFrames()
+    {
+        ChunkStreamer streamer = new(
+            _world,
+            new InlineChunkWorkQueue(new FloodedSlabGenerator(), new CulledChunkMesher()),
+            _settings with { MaxUploadsPerFrame = 1 });
+        for (int frame = 0; frame <= 2 * ChunksInWorld; frame++)
+        {
+            streamer.Update(Camera);
+            streamer.UploadCompleted(_renderer);
+        }
+
+        MeshHandle[] handles = _renderer.Uploads.ToArray();
+        Assert.Equal(2 * ChunksInWorld, handles.Length);
+
+        streamer.Update(new Vector3(16_000f, 4f, 0f));
+        for (int frame = 0; frame < ChunksInWorld; frame++)
+        {
+            streamer.UploadCompleted(_renderer);
+            Assert.Equal(2 * (frame + 1), _renderer.Releases.Count);
+        }
+
+        Assert.All(handles, handle => Assert.Contains(handle, _renderer.Releases));
+    }
+
+    [Fact]
+    public void UploadCompleted_StagedMixedMeshInvalidatedByEdit_ReleasesItsPartialUpload()
+    {
+        ChunkStreamer streamer = new(
+            _world,
+            new InlineChunkWorkQueue(new FloodedSlabGenerator(), new CulledChunkMesher()),
+            _settings with { RenderDistance = 0, MaxUploadsPerFrame = 1 });
+        streamer.Update(Camera);
+        streamer.Update(Camera);
+        streamer.UploadCompleted(_renderer);
+        MeshHandle obsolete = Assert.Single(_renderer.Uploads);
+
+        Assert.True(_world.SetBlock(new BlockPosition(8, 8, 8), BlockTypes.Stone));
+        for (int frame = 0; frame < 4; frame++)
+        {
+            streamer.Update(Camera);
+            streamer.UploadCompleted(_renderer);
+        }
+
+        Assert.Equal(obsolete, Assert.Single(_renderer.Releases));
+        Assert.Equal(3, _renderer.Uploads.Count);
+    }
+
+    [Fact]
+    public void UploadCompleted_StagedMixedMeshEvicted_ReleasesItsPartialUpload()
+    {
+        ChunkStreamer streamer = new(
+            _world,
+            new InlineChunkWorkQueue(new FloodedSlabGenerator(), new CulledChunkMesher()),
+            _settings with { RenderDistance = 0, MaxUploadsPerFrame = 1 });
+        streamer.Update(Camera);
+        streamer.Update(Camera);
+        streamer.UploadCompleted(_renderer);
+        MeshHandle staged = Assert.Single(_renderer.Uploads);
+
+        streamer.Update(new Vector3(16_000f, 4f, 0f));
+        streamer.UploadCompleted(_renderer);
+
+        Assert.Equal(staged, Assert.Single(_renderer.Releases));
+        Assert.Single(_renderer.Uploads);
+    }
+
+    [Fact]
+    public void UploadCompleted_NeighborUnloaded_ExposesTheSurvivorsBorderFace()
+    {
+        ChunkStreamer streamer = new(
+            _world,
+            new InlineChunkWorkQueue(new HalfSlabGenerator(), new CulledChunkMesher()),
+            _settings with { RenderDistance = 0 });
+        BlockId[] adjacent = new BlockId[Chunk.Volume];
+        adjacent[Chunk.Index(0, 4, 8)] = BlockTypes.Stone;
+        ChunkPosition east = new(1, 0, 0);
+        _world.LoadChunk(east, adjacent);
+
+        streamer.Update(Camera);
+        streamer.Update(Camera);
+        BlockId[] survivor = new BlockId[Chunk.Volume];
+        survivor[Chunk.Index(Chunk.Mask, 4, 8)] = BlockTypes.Stone;
+        _world.LoadChunk(new ChunkPosition(0, 0, 0), survivor);
+        for (int frame = 0; frame < 3; frame++)
+        {
+            streamer.Update(Camera);
+            streamer.UploadCompleted(_renderer);
+        }
+
+        Assert.Equal(20, _renderer.VertexCounts[_renderer.Uploads[^1]]);
+
+        Assert.True(_world.UnloadChunk(east));
+        streamer.Update(Camera);
+        streamer.UploadCompleted(_renderer);
+
+        Assert.Equal(24, _renderer.VertexCounts[_renderer.Uploads[^1]]);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)] // The scan already saw the edit, and skipped the chunk because its mesh was outstanding.
@@ -244,11 +365,25 @@ public class ChunkStreamerTests
     }
 
     [Fact]
-    public void Update_CameraMovesAway_UnloadsChunksAndReleasesTheirMeshes()
+    public void UploadCompleted_StationaryBorderEdit_ReplacesBothMeshes()
     {
         Settle();
 
-        Vector3 far = new(16_000f, 4f, 0f);
+        Assert.True(_world.SetBlock(new BlockPosition(Chunk.Mask, 4, 8), BlockTypes.Air));
+        Settle();
+
+        Assert.Equal(ChunksInWorld + 2, _renderer.Uploads.Count);
+        Assert.Equal(2, _renderer.Releases.Count);
+    }
+
+    [Theory]
+    [InlineData(16_000f)]
+    [InlineData(1_048_576f)]
+    public void Update_CameraMovesAway_UnloadsChunksAndReleasesTheirMeshes(float distance)
+    {
+        Settle();
+
+        Vector3 far = new(distance, 4f, 0f);
         _streamer.Update(far);
         _streamer.UploadCompleted(_renderer);
 

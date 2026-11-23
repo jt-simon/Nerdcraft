@@ -20,15 +20,26 @@ public sealed class VoxelWorld
     /// Increases whenever a chunk is loaded or unloaded or a block changes, so a caller can tell whether anything it
     /// derived from the world since it last looked may be out of date. It wraps around after <see cref="int.MaxValue"/>
     /// changes, so compare it only for inequality. It is local to this instance, so it is not a save or network
-    /// version, and it only reflects changes made through this class, not directly on a <see cref="Chunk"/>.
+    /// version.
     /// </summary>
     public int Revision { get; private set; }
 
     /// <summary>Positions of every chunk currently loaded. A live view: do not load or unload chunks while enumerating.</summary>
     public IReadOnlyCollection<ChunkPosition> LoadedChunks => _chunks.Keys;
 
-    /// <summary>Gets the chunk at <paramref name="position"/>; returns false if it is not loaded.</summary>
-    public bool TryGetChunk(ChunkPosition position, out Chunk chunk) => _chunks.TryGetValue(position, out chunk!);
+    /// <summary>Gets a read-only view of the live chunk at <paramref name="position"/>.</summary>
+    /// <returns>True when the chunk is loaded. The view is only valid on success.</returns>
+    public bool TryGetChunk(ChunkPosition position, out ChunkView chunk)
+    {
+        if (_chunks.TryGetValue(position, out Chunk? loaded))
+        {
+            chunk = new ChunkView(loaded);
+            return true;
+        }
+
+        chunk = default;
+        return false;
+    }
 
     /// <summary>True when a chunk exists at <paramref name="position"/>.</summary>
     public bool IsLoaded(ChunkPosition position) => _chunks.ContainsKey(position);
@@ -81,8 +92,14 @@ public sealed class VoxelWorld
     }
 
     /// <summary>Installs generated blocks, creating the chunk if needed, and invalidates the meshes of all 26 neighbors.</summary>
+    /// <exception cref="ArgumentException"><paramref name="blocks"/> must contain exactly <see cref="Chunk.Volume"/> blocks.</exception>
     public void LoadChunk(ChunkPosition position, ReadOnlySpan<BlockId> blocks)
     {
+        if (blocks.Length != Chunk.Volume)
+        {
+            throw new ArgumentException($"A chunk requires exactly {Chunk.Volume} blocks.", nameof(blocks));
+        }
+
         if (!_chunks.TryGetValue(position, out Chunk? chunk))
         {
             chunk = new Chunk(_versionFloor);
@@ -94,7 +111,7 @@ public sealed class VoxelWorld
         TouchNeighbors(position, -1, 1, -1, 1, -1, 1);
     }
 
-    /// <summary>Removes a chunk; returns false if it was not loaded. Neighbors are not touched.</summary>
+    /// <summary>Removes a chunk and invalidates the meshes of all 26 neighbors. Returns false if the chunk was not loaded.</summary>
     public bool UnloadChunk(ChunkPosition position)
     {
         if (!_chunks.Remove(position, out Chunk? chunk))
@@ -104,6 +121,7 @@ public sealed class VoxelWorld
 
         _versionFloor = Math.Max(_versionFloor, chunk.Version + 1);
         Revision++;
+        TouchNeighbors(position, -1, 1, -1, 1, -1, 1);
         return true;
     }
 

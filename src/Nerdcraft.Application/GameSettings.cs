@@ -19,12 +19,14 @@ public sealed record GameSettings
     /// <summary>Background workers for generation and meshing. Capped so weak machines keep a core free. At least 1.</summary>
     public int WorkerCount { get; init; } = Math.Clamp(Environment.ProcessorCount - 1, 1, 4);
 
-    /// <summary>Completed meshes uploaded to the GPU per frame, to avoid hitches when many finish at once. At least 1. The initial fill at the default render distance takes about 6 s at 8 and about 11 s at 4; 16 held 60 FPS on a desktop GPU but leaves less margin on integrated graphics.</summary>
+    /// <summary>
+    /// Maximum individual mesh uploads per frame, counting opaque and translucent meshes separately. At least 1.
+    /// </summary>
     public int MaxUploadsPerFrame { get; init; } = 8;
 
     /// <summary>
-    /// Generated chunks installed into the world per frame. Installing a chunk copies it and invalidates its neighbors,
-    /// so a burst of finished columns would otherwise stall one frame; the rest wait for the next. At least 1.
+    /// Maximum generated results processed per frame, including stale results. Installing a chunk copies it and
+    /// invalidates its neighbors, so results beyond the budget wait for the next frame. At least 1.
     /// </summary>
     public int MaxChunkInstallsPerFrame { get; init; } = 64;
 

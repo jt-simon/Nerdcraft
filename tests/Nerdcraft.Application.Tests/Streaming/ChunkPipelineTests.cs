@@ -116,17 +116,141 @@ public class ChunkPipelineTests
     [Fact]
     public async Task DisposeAsync_WithPendingWork_StopsWorkersWithoutDrainingQueue()
     {
-        SlowGenerator generator = new(TimeSpan.FromMilliseconds(50));
-        ChunkPipeline pipeline = new(generator, new CulledChunkMesher(), workerCount: 1, queueCapacity: 32);
-        for (int i = 0; i < 30; i++)
+        using ManualResetEventSlim release = new();
+        BlockingGenerator generator = new(release, blockFromCall: 2);
+        ChunkPipeline pipeline = new(generator, new CulledChunkMesher(), workerCount: 1);
+        ChunkPosition position = new(0, 0, 0);
+        VoxelWorld world = TestWorlds.WithEmptyChunks(position);
+        using ChunkSnapshot snapshot = ChunkSnapshot.Create(world, position);
+        try
         {
-            pipeline.TryRequestGenerateColumn(i, 0, 0, 0);
+            Assert.True(pipeline.TryRequestGenerateColumn(0, 0, 0, 0));
+            Assert.True(pipeline.TryRequestGenerateColumn(1, 0, 0, 0));
+            await WaitUntilAsync(() => generator.Calls == 2);
+            Assert.True(pipeline.TryRequestMesh(snapshot));
+            Assert.True(pipeline.TryRequestGenerateColumn(2, 0, 0, 0));
+            Task disposal = pipeline.DisposeAsync().AsTask();
+            release.Set();
+            await disposal.WaitAsync(Timeout, TestContext.Current.CancellationToken);
+        }
+        finally
+        {
+            release.Set();
+            await pipeline.DisposeAsync();
         }
 
-        await WaitUntilAsync(() => generator.Calls >= 1); // Dispose only once the worker has really started.
-        await pipeline.DisposeAsync().AsTask().WaitAsync(Timeout, TestContext.Current.CancellationToken);
+        Assert.Equal(2, generator.Calls);
+        Assert.Throws<ArgumentOutOfRangeException>(() => _ = snapshot.Blocks.Length);
+        Assert.False(pipeline.TryTakeGenerated(out _));
+    }
 
-        Assert.InRange(generator.Calls, 1, 29);
+    [Fact]
+    public async Task DisposeAsync_WithCompletedMesh_DisposesItsBuffers()
+    {
+        using ManualResetEventSlim release = new();
+        BlockingGenerator generator = new(release);
+        RecordingMesher mesher = new();
+        ChunkPipeline pipeline = new(generator, mesher, workerCount: 1);
+        ChunkPosition position = new(0, 0, 0);
+        VoxelWorld world = TestWorlds.WithEmptyChunks(position);
+        world.SetBlock(new BlockPosition(1, 1, 1), BlockTypes.Stone);
+        using ChunkSnapshot snapshot = ChunkSnapshot.Create(world, position);
+        try
+        {
+            Assert.True(pipeline.TryRequestMesh(snapshot));
+            Assert.True(pipeline.TryRequestGenerateColumn(0, 0, 0, 0));
+            await WaitUntilAsync(() => generator.Calls == 1);
+        }
+        finally
+        {
+            release.Set();
+            await pipeline.DisposeAsync();
+        }
+
+        ChunkMesh mesh = Assert.IsType<ChunkMesh>(mesher.Result);
+        Assert.Throws<ArgumentOutOfRangeException>(() => _ = mesh.Opaque.Positions.Length);
+        Assert.False(pipeline.TryTakeMeshed(out _));
+    }
+
+    [Fact]
+    public async Task DisposeAsync_AfterWorkerFault_DisposesQueuedSnapshots()
+    {
+        using ManualResetEventSlim release = new();
+        BlockingGenerator generator = new(release, fault: new InvalidOperationException("boom"));
+        ChunkPosition position = new(0, 0, 0);
+        VoxelWorld world = TestWorlds.WithEmptyChunks(position);
+        using ChunkSnapshot snapshot = ChunkSnapshot.Create(world, position);
+        await using ChunkPipeline pipeline = new(generator, new CulledChunkMesher(), workerCount: 1);
+
+        try
+        {
+            Assert.True(pipeline.TryRequestGenerateColumn(0, 0, 0, 0));
+            await WaitUntilAsync(() => generator.Calls == 1);
+            Assert.True(pipeline.TryRequestMesh(snapshot));
+        }
+        finally
+        {
+            release.Set();
+        }
+
+        await WaitForFaultAsync<InvalidOperationException>(pipeline);
+        await pipeline.DisposeAsync();
+        Assert.Throws<ArgumentOutOfRangeException>(() => _ = snapshot.Blocks.Length);
+    }
+
+    [Fact]
+    public async Task TryRequestMesh_WithOutstandingResultLimit_ResumesAfterResultIsTaken()
+    {
+        RecordingMesher mesher = new();
+        ChunkPosition position = new(0, 0, 0);
+        VoxelWorld world = TestWorlds.WithEmptyChunks(position);
+        using ChunkSnapshot first = ChunkSnapshot.Create(world, position);
+        using ChunkSnapshot second = ChunkSnapshot.Create(world, position);
+        using ChunkSnapshot third = ChunkSnapshot.Create(world, position);
+        await using ChunkPipeline pipeline = new(
+            new HalfSlabGenerator(), mesher, workerCount: 1, queueCapacity: 1);
+
+        Assert.True(pipeline.TryRequestMesh(first));
+        await WaitUntilAsync(() => mesher.Calls == 1);
+        Assert.True(pipeline.TryRequestMesh(second));
+        await WaitUntilAsync(() => mesher.Calls == 2);
+        Assert.False(pipeline.TryRequestMesh(third));
+
+        MeshedChunk result = default;
+        await WaitUntilAsync(() => pipeline.TryTakeMeshed(out result));
+        result.Mesh.Dispose();
+        Assert.True(pipeline.TryRequestMesh(third));
+    }
+
+    [Fact]
+    public async Task TryRequestGenerateColumn_WithOutstandingRowLimit_ResumesWhenRowsAreTaken()
+    {
+        using ManualResetEventSlim release = new(initialState: true);
+        BlockingGenerator generator = new(release);
+        await using ChunkPipeline pipeline = new(
+            generator, new CulledChunkMesher(), workerCount: 1, queueCapacity: 1);
+        WorldBounds bounds = WorldBounds.Default;
+        int rows = bounds.MaxChunkY - bounds.MinChunkY + 1;
+        int totalRows = 0;
+
+        Assert.True(pipeline.TryRequestGenerateColumn(0, 0, bounds.MinChunkY, bounds.MaxChunkY));
+        await WaitUntilAsync(() => generator.Calls == 1);
+        Assert.True(pipeline.TryRequestGenerateColumn(1, 0, bounds.MinChunkY, bounds.MaxChunkY));
+        await WaitUntilAsync(() => generator.Calls == 2);
+        Assert.False(pipeline.TryRequestGenerateColumn(2, 0, bounds.MinChunkY, bounds.MaxChunkY));
+
+        await WaitUntilAsync(() =>
+        {
+            while (totalRows < rows && pipeline.TryTakeGenerated(out GeneratedChunk result))
+            {
+                ArrayPool<BlockId>.Shared.Return(result.Blocks);
+                totalRows++;
+            }
+
+            return totalRows == rows;
+        });
+
+        Assert.True(pipeline.TryRequestGenerateColumn(2, 0, bounds.MinChunkY, bounds.MaxChunkY));
     }
 
     [Fact]
@@ -183,21 +307,45 @@ public class ChunkPipelineTests
         }
     }
 
-    private sealed class BlockingGenerator(ManualResetEventSlim release) : ITerrainGenerator
-    {
-        public void Generate(ChunkPosition position, Span<BlockId> blocks) => release.Wait(Timeout);
-    }
-
-    private sealed class SlowGenerator(TimeSpan delay) : ITerrainGenerator
+    private sealed class BlockingGenerator(ManualResetEventSlim release, int blockFromCall = 1, Exception? fault = null) : ITerrainGenerator
     {
         private int _calls;
 
         public int Calls => Volatile.Read(ref _calls);
 
         public void Generate(ChunkPosition position, Span<BlockId> blocks)
+            => GenerateColumn(position.X, position.Z, position.Y, position.Y, blocks);
+
+        public void GenerateColumn(int chunkX, int chunkZ, int minChunkY, int maxChunkY, Span<BlockId> blocks)
         {
+            if (Interlocked.Increment(ref _calls) >= blockFromCall)
+            {
+                release.Wait(Timeout);
+            }
+
+            if (fault is not null)
+            {
+                throw fault;
+            }
+
+            blocks.Clear();
+        }
+    }
+
+    private sealed class RecordingMesher : IChunkMesher
+    {
+        private readonly CulledChunkMesher _inner = new();
+        private int _calls;
+
+        public int Calls => Volatile.Read(ref _calls);
+        public ChunkMesh? Result { get; private set; }
+
+        public ChunkMesh Mesh(ChunkSnapshot snapshot)
+        {
+            ChunkMesh mesh = _inner.Mesh(snapshot);
+            Result = mesh;
             Interlocked.Increment(ref _calls);
-            Thread.Sleep(delay);
+            return mesh;
         }
     }
 
