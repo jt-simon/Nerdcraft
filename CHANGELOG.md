@@ -16,9 +16,11 @@ contain breaking changes.
 - `Chunk.IsEmpty`, which reports whether a chunk holds only air.
 - Ambient occlusion: block faces darken in corners and creases, including across chunk borders.
 - Caves: large caverns and winding tunnels carved from 3D noise, sealed below the surface except for occasional openings. The layers just above bedrock are never carved.
+- F3 toggles a debug overlay showing FPS and the camera position.
 
 ### Changed
 
+- `IRenderer.EndFrame` now takes an optional camera position and draws the debug overlay when it is set; `RaylibRenderer.ShowFps` is removed.
 - `GameSettings.WorldHeightInChunks` is replaced by `GameSettings.Bounds`.
 - Default `GameSettings.RenderDistance` is now 12 chunks (was 6).
 - `HeightmapTerrainGenerator` now requires a `WorldBounds` argument in its constructor.

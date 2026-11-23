@@ -19,9 +19,6 @@ public sealed unsafe class RaylibRenderer : IRenderer, IDisposable
     private readonly Material _material = Raylib_cs.Raylib.LoadMaterialDefault();
     private int _nextId;
 
-    /// <summary>Whether <see cref="EndFrame"/> draws raylib's FPS counter. Off by default; the host decides.</summary>
-    public bool ShowFps { get; init; }
-
     /// <inheritdoc/>
     public float AspectRatio
         => Raylib_cs.Raylib.GetRenderWidth() / (float)Math.Max(1, Raylib_cs.Raylib.GetRenderHeight());
@@ -79,13 +76,15 @@ public sealed unsafe class RaylibRenderer : IRenderer, IDisposable
         => Raylib_cs.Raylib.DrawMesh(_meshes[handle.Id], _material, Matrix4x4.Transpose(transform));
 
     /// <inheritdoc/>
-    /// <remarks>Draws the FPS counter when <see cref="ShowFps"/> is set.</remarks>
-    public void EndFrame()
+    /// <remarks>Draws the FPS counter and camera position when <paramref name="debugCameraPosition"/> is set.</remarks>
+    public void EndFrame(Vector3? debugCameraPosition)
     {
         Raylib_cs.Raylib.EndMode3D();
-        if (ShowFps)
+        if (debugCameraPosition is Vector3 position)
         {
             Raylib_cs.Raylib.DrawFPS(10, 10);
+            Raylib_cs.Raylib.DrawText(
+                $"Pos: {position.X:F1} {position.Y:F1} {position.Z:F1}", 10, 34, 20, Color.White);
         }
 
         Raylib_cs.Raylib.EndDrawing();

@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+using System.Numerics;
+
+using Nerdcraft.Application.Input;
 using Nerdcraft.Application.Meshing;
 using Nerdcraft.Application.Tests.Support;
 using Nerdcraft.Domain.World;
@@ -38,6 +41,41 @@ public class NerdcraftGameTests
         await using NerdcraftGame game = NerdcraftGame.Create(new GameSettings());
 
         Assert.NotNull(game);
+    }
+
+    [Fact]
+    public void Update_ToggleDebugPressed_ShowsOverlayWithCameraPosition()
+    {
+        (NerdcraftGame game, FakeRenderer renderer) = CreateDebugTestGame();
+
+        game.Update(new InputState(Vector3.Zero, Vector2.Zero, false, ToggleDebug: true), 0.016f);
+        game.Render(renderer);
+
+        Assert.Equal(new Vector3(8f, 100f, 8f), renderer.DebugOverlays[^1]);
+    }
+
+    [Fact]
+    public void Update_ToggleDebugPressedAgain_HidesOverlay()
+    {
+        (NerdcraftGame game, FakeRenderer renderer) = CreateDebugTestGame();
+
+        game.Update(new InputState(Vector3.Zero, Vector2.Zero, false, ToggleDebug: true), 0.016f);
+        game.Update(new InputState(Vector3.Zero, Vector2.Zero, false, ToggleDebug: true), 0.016f);
+        game.Render(renderer);
+
+        Assert.Null(renderer.DebugOverlays[^1]);
+    }
+
+    private static (NerdcraftGame Game, FakeRenderer Renderer) CreateDebugTestGame()
+    {
+        GameSettings settings = new()
+        {
+            RenderDistance = 1,
+            Bounds = new WorldBounds(0, Chunk.Size - 1),
+            MaxUploadsPerFrame = 100,
+        };
+        InlineChunkWorkQueue queue = new(new HalfSlabGenerator(), new CulledChunkMesher());
+        return (new NerdcraftGame(settings, queue, new VoxelWorld(), spawnHeight: 100f), new FakeRenderer());
     }
 
     private static GameSettings Invalid(string settingName) => settingName switch
