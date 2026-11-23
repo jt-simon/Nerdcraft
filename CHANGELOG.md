@@ -10,6 +10,9 @@ contain breaking changes.
 
 ### Added
 
+- Esc opens a pause menu with Resume and Quit buttons and releases the mouse; the player stands still while it is open. F11 toggles maximize.
+- `PauseMenu`, `PauseMenuView`, `MenuButton` and `UiRect` (Application), and `NerdcraftGame.IsPaused` / `ExitRequested`.
+- `InputState.TogglePause`, `Pointer`, `Click` and `ScreenSize`.
 - Player movement instead of a free camera: walking with gravity and block collision, jumping, sneaking (slower, lower eyes, no stepping off ledges), double-tap W sprinting, swimming in water, flight (F; still collides, ends on landing) and noclip (N). Controls are WASD, Space, Shift, F and N.
 - The movement rules are a pure, fixed-rate (20 Hz) simulation in Domain (`PlayerMovement`, `VoxelCollision`, `PlayerState`, `PlayerCommand`, `PlayerAbilities`), so a server can run the same code later.
 - `BlockTypes.IsSolid` and `BlockTypes.IsLiquid`.
@@ -37,10 +40,11 @@ contain breaking changes.
 
 ### Changed
 
+- Esc no longer quits the game directly; use the pause menu's Quit.
+- `IRenderer.EndFrame` now takes a `PauseMenuView?` to draw the pause menu.
 - World-owned chunks are exposed as read-only views. Block edits go through `VoxelWorld.SetBlock` so streaming sees every change.
 - Streaming bounds outstanding results and budgets individual mesh uploads, including water. Mixed chunks appear after both uploads are ready, and stale results and mesh releases are spread across frames.
 - Meshing allocates material buffers on demand, the debug mesh count is computed only when displayed, and Raylib batches depth-write changes across the water pass.
-
 - `InputState` now has `Move` as a `Vector2` and `Jump`, `Sneak`, `ToggleFly` and `ToggleNoclip` in place of `Sprint`; `FlyCamera` is replaced by `LocalPlayer`.
 - `NerdcraftGame`'s `spawnHeight` is now the height of the player's feet, and the player spawns standing on the terrain instead of 20 blocks above it.
 - `IRenderer.EndFrame` now takes an optional `DebugOverlay` (camera position plus `DrawStats`) and draws the debug overlay when it is set (`RaylibRenderer.ShowFps` is removed); `ChunkStreamer.Draw` returns the `DrawStats`.

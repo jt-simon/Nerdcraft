@@ -10,6 +10,7 @@ using Nerdcraft.Application.Player;
 using Nerdcraft.Application.Ports;
 using Nerdcraft.Application.Rendering;
 using Nerdcraft.Application.Streaming;
+using Nerdcraft.Application.Ui;
 using Nerdcraft.Domain.Entities;
 using Nerdcraft.Domain.World;
 using Nerdcraft.Domain.World.Generation;
@@ -35,6 +36,9 @@ public sealed class NerdcraftGame : IAsyncDisposable
     private readonly IAsyncDisposable? _workQueue;
     private readonly float _farPlane;
     private bool _showDebug;
+    private int _ignoreLookFrames;
+    private Vector2 _screenSize;
+    private Vector2 _pointer;
     private long _previousFrame;
 
     /// <summary>Creates a game over the supplied work queue and world. If <paramref name="workQueue"/> is <see cref="IAsyncDisposable"/>, this game disposes it.</summary>
@@ -67,8 +71,19 @@ public sealed class NerdcraftGame : IAsyncDisposable
         return new NerdcraftGame(settings, pipeline, new VoxelWorld(), Math.Max(generator.SurfaceHeight(8, 8), HeightmapTerrainGenerator.SeaLevel) + 1);
     }
 
+    /// <summary>True while the pause menu is open. The host should release the cursor then, and capture it otherwise.</summary>
+    public bool IsPaused { get; private set; }
+
+    /// <summary>True once the player chose Quit in the pause menu. The host should then stop its loop.</summary>
+    public bool ExitRequested { get; private set; }
+
     /// <summary>Advances the player by <paramref name="deltaSeconds"/> and requests any chunks they now need. Does not touch the renderer.</summary>
-    /// <param name="input">This frame's input. Toggles the debug overlay when <see cref="InputState.ToggleDebug"/> is set, and flight and noclip likewise.</param>
+    /// <param name="input">
+    /// This frame's input. Toggles the debug overlay when <see cref="InputState.ToggleDebug"/> is set, and flight and noclip likewise.
+    /// <see cref="InputState.TogglePause"/> opens or closes the pause menu; while it is open the player stands still, chunks keep
+    /// streaming, and a <see cref="InputState.Click"/> on a button acts on it. Look input is ignored on the frame the menu closes and the two after it,
+    /// because the host re-captures the cursor then and the pointer jumps.
+    /// </param>
     /// <param name="deltaSeconds">Time since the previous frame, in seconds.</param>
     public void Update(InputState input, float deltaSeconds)
     {
@@ -93,7 +108,37 @@ public sealed class NerdcraftGame : IAsyncDisposable
             _showDebug = !_showDebug;
         }
 
-        _player.Update(input, deltaSeconds);
+        _screenSize = input.ScreenSize;
+        _pointer = input.Pointer;
+
+        if (input.TogglePause)
+        {
+            SetPaused(!IsPaused);
+        }
+        else if (IsPaused && input.Click)
+        {
+            PauseMenuView menu = PauseMenu.Layout(_screenSize, _pointer);
+            if (menu.Buttons[PauseMenu.ResumeIndex].Bounds.Contains(_pointer))
+            {
+                SetPaused(false);
+            }
+            else if (menu.Buttons[PauseMenu.QuitIndex].Bounds.Contains(_pointer))
+            {
+                ExitRequested = true;
+            }
+        }
+
+        if (!IsPaused)
+        {
+            if (_ignoreLookFrames > 0)
+            {
+                _ignoreLookFrames--;
+                input = input with { LookDelta = Vector2.Zero };
+            }
+
+            _player.Update(input, deltaSeconds);
+        }
+
         _streamer.Update(_player.EyePosition);
         StreamingMetrics.RecordElapsed(UpdateTime, started);
     }
@@ -112,8 +157,20 @@ public sealed class NerdcraftGame : IAsyncDisposable
 
         renderer.BeginFrame(view, SkyColor);
         DrawStats stats = _streamer.Draw(renderer, frustum, view.Position, countMeshedChunks: _showDebug);
-        renderer.EndFrame(_showDebug ? new DebugOverlay(_player.EyePosition, stats) : null);
+        renderer.EndFrame(
+            _showDebug ? new DebugOverlay(_player.EyePosition, stats) : null,
+            IsPaused ? PauseMenu.Layout(_screenSize, _pointer) : null);
         StreamingMetrics.RecordElapsed(DrawTime, drawStarted);
+    }
+
+    private void SetPaused(bool paused)
+    {
+        IsPaused = paused;
+        if (!paused)
+        {
+            _ignoreLookFrames = 3;
+            _player.ClearPendingInput();
+        }
     }
 
     /// <summary>

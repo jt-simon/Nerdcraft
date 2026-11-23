@@ -18,6 +18,8 @@ Nerdcraft.Desktop            composition root (the only place a renderer meets t
   rules (`PlayerMovement`, `VoxelCollision`). Pure C#, no I/O.
 - **Application**: `NerdcraftGame` (the host calls `Update` then `Render` each frame), `IRenderer` (the
   port every graphics backend implements), meshing, chunk streaming, `LocalPlayer`, `InputState`.
+- **Pause menu**: pause state, button layout (`PauseMenu`) and hit-testing live in Application; a renderer only draws the
+  `PauseMenuView` it is handed. The adapter owns window concerns: capturing the cursor and F11 maximize.
 - **Rendering.Raylib**: implements `IRenderer`, reads raylib input into `InputState`.
 
 Math uses `System.Numerics`. The core produces plain `MeshData` (positions, normals, colors, indices) and

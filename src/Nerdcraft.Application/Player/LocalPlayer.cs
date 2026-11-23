@@ -128,6 +128,23 @@ public sealed class LocalPlayer
         _tickLeftoverSeconds = Math.Min(_tickLeftoverSeconds, TickSeconds);
     }
 
+    /// <summary>
+    /// Forgets held keys, the double-tap timer and any request still waiting for a tick, so input from before a pause can't act
+    /// after it. Look direction and position are kept.
+    /// </summary>
+    public void ClearPendingInput()
+    {
+        _move = Vector2.Zero;
+        _jumpHeld = false;
+        _sneak = false;
+        _forwardHeld = false;
+        _secondsSinceForwardPress = float.PositiveInfinity;
+        _jumpTapped = false;
+        _sprintRequested = false;
+        _toggleFly = false;
+        _toggleNoclip = false;
+    }
+
     /// <summary>Builds the view description a renderer needs for the current look direction and interpolated eye position.</summary>
     public CameraView ToView(float fovYDegrees, float nearPlane, float farPlane)
     {

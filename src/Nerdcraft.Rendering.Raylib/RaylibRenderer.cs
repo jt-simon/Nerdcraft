@@ -5,6 +5,7 @@ using System.Numerics;
 
 using Nerdcraft.Application.Ports;
 using Nerdcraft.Application.Rendering;
+using Nerdcraft.Application.Ui;
 
 using Raylib_cs;
 
@@ -114,9 +115,10 @@ public sealed unsafe class RaylibRenderer : IRenderer, IDisposable
     /// <inheritdoc/>
     /// <remarks>
     /// Draws the FPS counter, camera position, chunks drawn / meshed and vertices drawn (in millions) when
-    /// <paramref name="debug"/> is set.
+    /// <paramref name="debug"/> is set. When <paramref name="menu"/> is set, dims the frame and draws each button
+    /// with its label centered.
     /// </remarks>
-    public void EndFrame(DebugOverlay? debug)
+    public void EndFrame(DebugOverlay? debug, PauseMenuView? menu)
     {
         EndTranslucentPass();
         Raylib_cs.Raylib.EndMode3D();
@@ -129,6 +131,23 @@ public sealed unsafe class RaylibRenderer : IRenderer, IDisposable
             Raylib_cs.Raylib.DrawText(
                 $"Chunks: {overlay.Stats.ChunksDrawn} / {overlay.Stats.ChunksMeshed}  Verts: {overlay.Stats.VerticesDrawn / 1_000_000d:F2}M",
                 10, 58, 20, Color.White);
+        }
+
+        if (menu is { } pause)
+        {
+            Raylib_cs.Raylib.DrawRectangle(
+                0, 0, Raylib_cs.Raylib.GetScreenWidth(), Raylib_cs.Raylib.GetScreenHeight(), new Color(0, 0, 0, 150));
+            foreach (MenuButton button in pause.Buttons)
+            {
+                int x = (int)button.Bounds.X;
+                int y = (int)button.Bounds.Y;
+                int width = (int)button.Bounds.Width;
+                int height = (int)button.Bounds.Height;
+                Raylib_cs.Raylib.DrawRectangle(x, y, width, height, button.Hovered ? new Color(110, 110, 110, 255) : new Color(70, 70, 70, 255));
+                Raylib_cs.Raylib.DrawRectangleLines(x, y, width, height, Color.White);
+                int textWidth = Raylib_cs.Raylib.MeasureText(button.Label, 24);
+                Raylib_cs.Raylib.DrawText(button.Label, x + ((width - textWidth) / 2), y + ((height - 24) / 2), 24, Color.White);
+            }
         }
 
         Raylib_cs.Raylib.EndDrawing();

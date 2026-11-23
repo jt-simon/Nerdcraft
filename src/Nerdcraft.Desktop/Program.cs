@@ -11,10 +11,11 @@ try
 {
     using RaylibWindow window = new("Nerdcraft", 1280, 720);
     using RaylibRenderer renderer = new();
-    while (!window.ShouldClose)
+    while (!window.ShouldClose && !game.ExitRequested)
     {
         // Clamp so a hitch (window drag, debugger) doesn't fling the camera.
         game.Update(RaylibInput.Read(), Math.Min(window.FrameSeconds, 0.1f));
+        window.Update(captureCursor: !game.IsPaused);
         game.Render(renderer);
     }
 }
