@@ -18,9 +18,17 @@ contain breaking changes.
 - Caves: large caverns and winding tunnels carved from 3D noise, sealed below the surface except for occasional openings. The layers just above bedrock are never carved.
 - F3 toggles a debug overlay showing FPS and the camera position.
 
+- Translucent water fills the terrain up to sea level (`HeightmapTerrainGenerator.SeaLevel`, Y = 0).
+- Surface materials by height: gravel on the deep seabed, sand on the shallow seabed and beaches, grass over dirt in between, bare stone on high ground and snow on the peaks. Band edges are shifted by noise so they wander. New block types `Sand`, `Gravel`, `Snow` and `Water`.
+- `IRenderer.DrawTranslucentMesh`, a blended draw pass without depth writes, and `BlockPalette.IsTranslucent`.
+
 ### Changed
 
 - `IRenderer.EndFrame` now takes an optional camera position and draws the debug overlay when it is set; `RaylibRenderer.ShowFps` is removed.
+- `IChunkMesher.Mesh` returns a `ChunkMesh` (opaque and translucent meshes) instead of a `MeshData`, and `MeshedChunk.Mesh` has the same type.
+- `ChunkStreamer.Draw` takes the camera position, to draw translucent meshes from farthest to nearest.
+- Every seed generates a different world than before, and caves no longer open into the seabed.
+- The camera spawns above sea level even over a seabed.
 - `GameSettings.WorldHeightInChunks` is replaced by `GameSettings.Bounds`.
 - Default `GameSettings.RenderDistance` is now 12 chunks (was 6).
 - `HeightmapTerrainGenerator` now requires a `WorldBounds` argument in its constructor.

@@ -8,14 +8,27 @@ namespace Nerdcraft.Domain.World.Generation;
 /// <summary>
 /// Generates terrain from layered OpenSimplex2 noise: a continent layer sets the base height around sea level
 /// (Y = 0), a mountain mask decides how much relief an area gets, and hill noise adds the relief. Each
-/// column is grass on the surface, <c>DirtDepth</c> (3) layers of dirt, then stone, with bedrock on the
-/// bottom layer of the world. Caves are carved out of the stone afterwards from 3D noise: large caverns and
-/// winding tunnels, which stay sealed below the surface except for occasional openings. There is no water yet.
+/// column's top layers depend on its height: gravel on the deep seabed, sand on the shallow seabed and beaches,
+/// grass over dirt in between, bare stone on high ground and snow on the peaks. Each band edge is shifted by a
+/// little noise so the boundaries wander. <c>DirtDepth</c> (3) layers of that material sit over stone, with bedrock
+/// on the bottom layer of the world. Water fills every column up to <see cref="SeaLevel"/>. Caves are carved out
+/// of the stone afterwards from 3D noise: large caverns and winding tunnels, which stay sealed below the surface
+/// except for occasional openings, and never open into the seabed.
 /// The same seed and bounds always yield the same world.
 /// </summary>
 public sealed class HeightmapTerrainGenerator : ITerrainGenerator
 {
+    /// <summary>World Y of the water surface: water fills every column's air up to and including this height.</summary>
+    public const int SeaLevel = 0;
+
     private const int DirtDepth = 3;
+
+    // Surface material bands, as surface heights. Each edge is moved by up to BandJitter blocks of noise.
+    private const int DeepWaterDepth = 6; // Surfaces this far below sea level or deeper are gravel.
+    private const int BeachHeight = 2; // Surfaces up to this far above sea level (and the shallow seabed) are sand.
+    private const int RockLine = 26; // Surfaces from here up are bare stone.
+    private const int SnowLine = 38; // Surfaces from here up are snow.
+    private const float BandJitter = 3f;
 
     // FastNoiseLite spans about +/-0.96 where the terrain was tuned against noise spanning about +/-0.7.
     // Scaling by this keeps the same height statistics.
@@ -30,6 +43,7 @@ public sealed class HeightmapTerrainGenerator : ITerrainGenerator
     private const int ContinentSeedOffset = 101;
     private const int MountainSeedOffset = 202;
     private const int HillSeedOffset = 303;
+    private const int BandSeedOffset = 707;
     private const int CavernSeedOffset = 404;
     private const int TunnelASeedOffset = 505;
     private const int TunnelBSeedOffset = 606;
@@ -51,6 +65,7 @@ public sealed class HeightmapTerrainGenerator : ITerrainGenerator
     private readonly FastNoiseLite _continent;
     private readonly FastNoiseLite _mountains;
     private readonly FastNoiseLite _hills;
+    private readonly FastNoiseLite _bands;
     private readonly FastNoiseLite _caverns;
     private readonly FastNoiseLite _tunnelsA;
     private readonly FastNoiseLite _tunnelsB;
@@ -69,6 +84,7 @@ public sealed class HeightmapTerrainGenerator : ITerrainGenerator
         _continent = CreateLayer(seed + ContinentSeedOffset, scale: 1000f, octaves: 3);
         _mountains = CreateLayer(seed + MountainSeedOffset, scale: 800f, octaves: 2);
         _hills = CreateLayer(seed + HillSeedOffset, scale: 300f, octaves: 3);
+        _bands = CreateLayer(seed + BandSeedOffset, scale: 40f, octaves: 2);
         _caverns = CreateCaveLayer(seed + CavernSeedOffset, scale: 55f, octaves: 2);
         _tunnelsA = CreateCaveLayer(seed + TunnelASeedOffset, scale: 48f, octaves: 1);
         _tunnelsB = CreateCaveLayer(seed + TunnelBSeedOffset, scale: 48f, octaves: 1);
@@ -87,6 +103,7 @@ public sealed class HeightmapTerrainGenerator : ITerrainGenerator
             return;
         }
 
+        int waterTop = Math.Min(SeaLevel, _bounds.MaxY);
         Span<int> surfaces = stackalloc int[Chunk.Size * Chunk.Size];
         for (int z = 0; z < Chunk.Size; z++)
         {
@@ -94,10 +111,11 @@ public sealed class HeightmapTerrainGenerator : ITerrainGenerator
             {
                 int surface = SurfaceHeight(origin.X + x, origin.Z + z);
                 surfaces[(z * Chunk.Size) + x] = surface;
+                (BlockId top, BlockId filler) = SurfaceMaterials(surface, origin.X + x, origin.Z + z);
                 for (int y = 0; y < Chunk.Size; y++)
                 {
                     int worldY = origin.Y + y;
-                    if (worldY > surface)
+                    if (worldY > Math.Max(surface, waterTop))
                     {
                         break;
                     }
@@ -108,8 +126,9 @@ public sealed class HeightmapTerrainGenerator : ITerrainGenerator
                     }
 
                     blocks[Chunk.Index(x, y, z)] = worldY == _bounds.MinY ? BlockTypes.Bedrock
-                        : worldY == surface ? BlockTypes.Grass
-                        : worldY >= surface - DirtDepth ? BlockTypes.Dirt
+                        : worldY > surface ? BlockTypes.Water
+                        : worldY == surface ? top
+                        : worldY >= surface - DirtDepth ? filler
                         : BlockTypes.Stone;
                 }
             }
@@ -119,7 +138,7 @@ public sealed class HeightmapTerrainGenerator : ITerrainGenerator
     }
 
     /// <summary>
-    /// World Y of the topmost (grass) block in the column at the given world X and Z, relative to sea level at Y = 0.
+    /// World Y of the topmost solid block in the column at the given world X and Z, relative to sea level at Y = 0.
     /// Always in [<c>MinY + 1</c>, <c>MaxY</c>] so bedrock stays below the surface.
     /// </summary>
     public int SurfaceHeight(int worldX, int worldZ)
@@ -139,6 +158,35 @@ public sealed class HeightmapTerrainGenerator : ITerrainGenerator
 
         int height = (int)MathF.Floor(baseHeight + relief);
         return Math.Clamp(height, _bounds.MinY + 1, _bounds.MaxY);
+    }
+
+    // The top block and the three layers under it for a column, chosen by surface height. Bands are checked from the
+    // top down; each edge is moved by band noise so the boundaries are not flat contour lines.
+    private (BlockId Top, BlockId Filler) SurfaceMaterials(int surface, int worldX, int worldZ)
+    {
+        float jitter = Sample(_bands, worldX, worldZ) * (BandJitter / 0.7f);
+        float height = surface - jitter;
+        if (height >= SnowLine)
+        {
+            return (BlockTypes.Snow, BlockTypes.Stone);
+        }
+
+        if (height >= RockLine)
+        {
+            return (BlockTypes.Stone, BlockTypes.Stone);
+        }
+
+        if (height <= SeaLevel - DeepWaterDepth)
+        {
+            return (BlockTypes.Gravel, BlockTypes.Gravel);
+        }
+
+        if (height <= SeaLevel + BeachHeight)
+        {
+            return (BlockTypes.Sand, BlockTypes.Sand);
+        }
+
+        return (BlockTypes.Grass, BlockTypes.Dirt);
     }
 
     // Turns blocks to air where the cave noise is strong enough. Each block gets a score in (0, 1] from the cavern and
@@ -176,7 +224,8 @@ public sealed class HeightmapTerrainGenerator : ITerrainGenerator
             {
                 int surface = surfaces[(z * Chunk.Size) + x];
                 int first = Math.Max(lowestCarved - origin.Y, 0);
-                int last = Math.Min(surface - origin.Y, Chunk.Size - 1);
+                int highestCarved = surface < SeaLevel ? surface - OpeningDepth : surface; // Never open the seabed.
+                int last = Math.Min(highestCarved - origin.Y, Chunk.Size - 1);
                 for (int y = first; y <= last; y++)
                 {
                     int depth = surface - (origin.Y + y);

@@ -22,6 +22,11 @@ public sealed class FakeRenderer : IRenderer
     /// <summary>Camera position passed to each <see cref="EndFrame"/>; null when the debug overlay was hidden.</summary>
     public List<Vector3?> DebugOverlays { get; } = [];
 
+    public List<MeshHandle> TranslucentDraws { get; } = [];
+
+    /// <summary>Every draw call in submission order; true marks a translucent draw.</summary>
+    public List<(MeshHandle Handle, bool Translucent)> AllDraws { get; } = [];
+
     public MeshHandle UploadMesh(MeshData mesh)
     {
         MeshHandle handle = new(++_nextHandle);
@@ -35,7 +40,17 @@ public sealed class FakeRenderer : IRenderer
     {
     }
 
-    public void DrawMesh(MeshHandle handle, Matrix4x4 transform) => Draws.Add(handle);
+    public void DrawMesh(MeshHandle handle, Matrix4x4 transform)
+    {
+        Draws.Add(handle);
+        AllDraws.Add((handle, false));
+    }
+
+    public void DrawTranslucentMesh(MeshHandle handle, Matrix4x4 transform)
+    {
+        TranslucentDraws.Add(handle);
+        AllDraws.Add((handle, true));
+    }
 
     public void EndFrame(Vector3? debugCameraPosition) => DebugOverlays.Add(debugCameraPosition);
 }

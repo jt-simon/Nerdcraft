@@ -76,6 +76,17 @@ public sealed unsafe class RaylibRenderer : IRenderer, IDisposable
         => Raylib_cs.Raylib.DrawMesh(_meshes[handle.Id], _material, Matrix4x4.Transpose(transform));
 
     /// <inheritdoc/>
+    /// <remarks>Flushes the batch and turns depth writes off around the draw, so opaque meshes still occlude it.</remarks>
+    public void DrawTranslucentMesh(MeshHandle handle, Matrix4x4 transform)
+    {
+        Rlgl.DrawRenderBatchActive();
+        Rlgl.DisableDepthMask();
+        DrawMesh(handle, transform);
+        Rlgl.DrawRenderBatchActive();
+        Rlgl.EnableDepthMask();
+    }
+
+    /// <inheritdoc/>
     /// <remarks>Draws the FPS counter and camera position when <paramref name="debugCameraPosition"/> is set.</remarks>
     public void EndFrame(Vector3? debugCameraPosition)
     {

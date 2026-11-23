@@ -54,9 +54,9 @@ public class ChunkPipelineTests
 
         MeshedChunk result = default;
         await WaitUntilAsync(() => pipeline.TryTakeMeshed(out result));
-        using MeshData mesh = result.Mesh;
+        using ChunkMesh mesh = result.Mesh;
         Assert.Equal(version, result.Version);
-        Assert.Equal(24, mesh.VertexCount);
+        Assert.Equal(24, mesh.Opaque.VertexCount);
     }
 
     [Fact]

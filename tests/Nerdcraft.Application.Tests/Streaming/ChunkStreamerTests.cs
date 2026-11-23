@@ -214,11 +214,50 @@ public class ChunkStreamerTests
         Frustum towardWorld = FrustumFrom(new Vector3(8, 40, 8), new Vector3(8, 0, 8), Vector3.UnitZ * -1);
         Frustum awayFromWorld = FrustumFrom(new Vector3(8, 40, 8), new Vector3(8, 80, 8), Vector3.UnitZ * -1);
 
-        _streamer.Draw(_renderer, awayFromWorld);
+        _streamer.Draw(_renderer, awayFromWorld, Vector3.Zero);
         Assert.Empty(_renderer.Draws);
 
-        _streamer.Draw(_renderer, towardWorld);
+        _streamer.Draw(_renderer, towardWorld, Vector3.Zero);
         Assert.NotEmpty(_renderer.Draws);
+    }
+
+    [Fact]
+    public void Draw_ChunksWithWater_DrawsTranslucentAfterOpaqueAndNearestLast()
+    {
+        (ChunkStreamer streamer, FakeRenderer renderer) = FloodedStreamer();
+        Frustum towardWorld = FrustumFrom(new Vector3(8, 40, 8), new Vector3(8, 0, 8), Vector3.UnitZ * -1);
+
+        streamer.Draw(renderer, towardWorld, Camera);
+
+        int firstTranslucent = renderer.AllDraws.FindIndex(draw => draw.Translucent);
+        Assert.True(firstTranslucent > 0, "Expected opaque draws followed by translucent ones.");
+        Assert.All(renderer.AllDraws.Skip(firstTranslucent), draw => Assert.True(draw.Translucent));
+        MeshHandle nearestWater = renderer.Uploads[1]; // Chunk (0,0,0) uploads first: its opaque mesh, then its water.
+        Assert.Equal((nearestWater, true), renderer.AllDraws[^1]);
+    }
+
+    [Fact]
+    public void Update_CameraMovesAway_ReleasesTranslucentMeshesToo()
+    {
+        (ChunkStreamer streamer, FakeRenderer renderer) = FloodedStreamer();
+
+        streamer.Update(new Vector3(16_000f, 4f, 0f));
+        streamer.UploadCompleted(renderer);
+
+        Assert.Equal(2 * ChunksInWorld, renderer.Releases.Count);
+    }
+
+    private (ChunkStreamer Streamer, FakeRenderer Renderer) FloodedStreamer()
+    {
+        FakeRenderer renderer = new();
+        ChunkStreamer streamer = new(new VoxelWorld(), new InlineChunkWorkQueue(new FloodedSlabGenerator(), new CulledChunkMesher()), _settings);
+        for (int frame = 0; frame < 4; frame++)
+        {
+            streamer.Update(Camera);
+            streamer.UploadCompleted(renderer);
+        }
+
+        return (streamer, renderer);
     }
 
     // Enough frames for generation, then meshing, then upload to complete with the inline queue.

@@ -14,11 +14,14 @@ public class CulledChunkMesherTests
 {
     private static readonly ChunkPosition Origin = new(0, 0, 0);
 
-    private static MeshData MeshChunk(VoxelWorld world, ChunkPosition position)
+    private static ChunkMesh MeshAll(VoxelWorld world, ChunkPosition position)
     {
         using ChunkSnapshot snapshot = ChunkSnapshot.Create(world, position);
         return new CulledChunkMesher().Mesh(snapshot);
     }
+
+    // The opaque mesh only; the caller disposes it. The translucent half is empty for worlds without water.
+    private static MeshData MeshChunk(VoxelWorld world, ChunkPosition position) => MeshAll(world, position).Opaque;
 
     // Index of the vertex at a chunk-local position with the given face normal.
     private static int FindVertex(MeshData mesh, Vector3 position, Vector3 normal)
@@ -184,6 +187,57 @@ public class CulledChunkMesherTests
         int dark = FindVertex(mesh, new Vector3(6, 6, 6), Vector3.UnitY);
         int opposite = FindVertex(mesh, new Vector3(5, 6, 5), Vector3.UnitY);
         Assert.True(SharesATriangle(mesh, dark, opposite), "The shared edge of the two triangles should run through the dark corner.");
+    }
+
+    [Fact]
+    public void Mesh_WaterBlock_GoesOnlyToTheTranslucentMesh()
+    {
+        VoxelWorld world = TestWorlds.WithEmptyChunks(Origin);
+        world.SetBlock(new BlockPosition(5, 5, 5), BlockTypes.Water);
+
+        using ChunkMesh mesh = MeshAll(world, Origin);
+
+        Assert.Equal(0, mesh.Opaque.VertexCount);
+        Assert.Equal(24, mesh.Translucent.VertexCount);
+    }
+
+    [Fact]
+    public void Mesh_AdjacentWaterBlocks_EmitNoFaceBetweenThem()
+    {
+        VoxelWorld world = TestWorlds.WithEmptyChunks(Origin);
+        world.SetBlock(new BlockPosition(5, 5, 5), BlockTypes.Water);
+        world.SetBlock(new BlockPosition(6, 5, 5), BlockTypes.Water);
+
+        using ChunkMesh mesh = MeshAll(world, Origin);
+
+        Assert.Equal(10 * 4, mesh.Translucent.VertexCount);
+    }
+
+    [Fact]
+    public void Mesh_SolidBlockUnderWater_EmitsTheFaceBetweenThemButWaterDoesNot()
+    {
+        VoxelWorld world = TestWorlds.WithEmptyChunks(Origin);
+        world.SetBlock(new BlockPosition(5, 5, 5), BlockTypes.Sand);
+        world.SetBlock(new BlockPosition(5, 6, 5), BlockTypes.Water);
+
+        using ChunkMesh mesh = MeshAll(world, Origin);
+
+        Assert.Equal(6 * 4, mesh.Opaque.VertexCount); // The sand keeps its top face under the water.
+        Assert.Equal(5 * 4, mesh.Translucent.VertexCount); // The water has no bottom face against the sand.
+    }
+
+    [Fact]
+    public void Mesh_WaterBesideSolidBlock_DoesNotDarkenTheBlock()
+    {
+        VoxelWorld world = TestWorlds.WithEmptyChunks(Origin);
+        world.SetBlock(new BlockPosition(5, 5, 5), BlockTypes.Stone);
+        world.SetBlock(new BlockPosition(6, 6, 5), BlockTypes.Water); // Where a solid block would shade the top face.
+
+        using ChunkMesh mesh = MeshAll(world, Origin);
+
+        int nearWater = Red(mesh.Opaque, FindVertex(mesh.Opaque, new Vector3(6, 6, 5), Vector3.UnitY));
+        int open = Red(mesh.Opaque, FindVertex(mesh.Opaque, new Vector3(5, 6, 5), Vector3.UnitY));
+        Assert.Equal(open, nearWater);
     }
 
     [Fact]

@@ -23,6 +23,7 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
 {
     private readonly Dictionary<ChunkPosition, Entry> _entries = [];
     private readonly List<MeshHandle> _pendingRelease = [];
+    private readonly List<TranslucentDraw> _translucentScratch = [];
     private readonly List<ChunkPosition> _unloadScratch = [];
     private readonly (int Dx, int Dz)[] _loadOffsets = BuildLoadOffsets(settings.RenderDistance);
     private (int X, int Z)? _lastCameraChunk;
@@ -57,7 +58,7 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
         int uploads = 0;
         while (uploads < settings.MaxUploadsPerFrame && queue.TryTakeMeshed(out MeshedChunk result))
         {
-            using MeshData mesh = result.Mesh;
+            using ChunkMesh mesh = result.Mesh;
             if (!_entries.TryGetValue(result.Position, out Entry? entry)
                 || !world.TryGetChunk(result.Position, out Chunk chunk))
             {
@@ -81,30 +82,69 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
                 entry.Handle = null;
             }
 
-            entry.MeshedVersion = result.Version;
-            if (mesh.VertexCount > 0)
+            if (entry.TranslucentHandle is { } oldTranslucent)
             {
-                entry.Handle = renderer.UploadMesh(mesh);
+                renderer.ReleaseMesh(oldTranslucent);
+                entry.TranslucentHandle = null;
+            }
+
+            entry.MeshedVersion = result.Version;
+            if (mesh.Opaque.VertexCount > 0)
+            {
+                entry.Handle = renderer.UploadMesh(mesh.Opaque);
+            }
+
+            if (mesh.Translucent.VertexCount > 0)
+            {
+                entry.TranslucentHandle = renderer.UploadMesh(mesh.Translucent);
+            }
+
+            if (entry.Handle is not null || entry.TranslucentHandle is not null)
+            {
                 uploads++;
             }
         }
     }
 
-    /// <summary>Draws every uploaded chunk mesh that intersects <paramref name="frustum"/>, translated to its world position.</summary>
-    public void Draw(IRenderer renderer, Frustum frustum)
+    /// <summary>
+    /// Draws every uploaded chunk mesh that intersects <paramref name="frustum"/>, translated to its world position:
+    /// all opaque meshes first, then the translucent ones from the farthest chunk to the nearest.
+    /// </summary>
+    /// <param name="renderer">Receives the draw calls.</param>
+    /// <param name="frustum">The view volume; chunks outside it are skipped.</param>
+    /// <param name="cameraPosition">Camera position in world space, used to order the translucent meshes.</param>
+    public void Draw(IRenderer renderer, Frustum frustum, Vector3 cameraPosition)
     {
+        _translucentScratch.Clear();
         foreach ((ChunkPosition position, Entry entry) in _entries)
         {
-            if (entry.Handle is not { } handle)
+            if (entry.Handle is null && entry.TranslucentHandle is null)
             {
                 continue;
             }
 
             Vector3 min = new(position.X * Chunk.Size, position.Y * Chunk.Size, position.Z * Chunk.Size);
-            if (frustum.Intersects(min, min + new Vector3(Chunk.Size)))
+            if (!frustum.Intersects(min, min + new Vector3(Chunk.Size)))
+            {
+                continue;
+            }
+
+            if (entry.Handle is { } handle)
             {
                 renderer.DrawMesh(handle, Matrix4x4.CreateTranslation(min));
             }
+
+            if (entry.TranslucentHandle is { } translucent)
+            {
+                float distance = Vector3.DistanceSquared(min + new Vector3(Chunk.Size / 2f), cameraPosition);
+                _translucentScratch.Add(new TranslucentDraw(translucent, min, distance));
+            }
+        }
+
+        _translucentScratch.Sort(static (a, b) => b.DistanceSquared.CompareTo(a.DistanceSquared));
+        foreach (TranslucentDraw draw in _translucentScratch)
+        {
+            renderer.DrawTranslucentMesh(draw.Handle, Matrix4x4.CreateTranslation(draw.Min));
         }
     }
 
@@ -122,9 +162,9 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
 
         foreach (ChunkPosition position in _unloadScratch)
         {
-            if (_entries.Remove(position, out Entry? entry) && entry.Handle is { } handle)
+            if (_entries.Remove(position, out Entry? entry))
             {
-                _pendingRelease.Add(handle);
+                ReleaseLater(entry);
             }
 
             world.UnloadChunk(position);
@@ -198,16 +238,27 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
 
         if (chunk.Version != entry.MeshedVersion)
         {
-            if (entry.Handle is { } handle)
-            {
-                _pendingRelease.Add(handle);
-                entry.Handle = null;
-            }
-
+            ReleaseLater(entry);
             entry.MeshedVersion = chunk.Version;
         }
 
         return true;
+    }
+
+    // Queues the entry's uploaded meshes for release on the next UploadCompleted.
+    private void ReleaseLater(Entry entry)
+    {
+        if (entry.Handle is { } handle)
+        {
+            _pendingRelease.Add(handle);
+            entry.Handle = null;
+        }
+
+        if (entry.TranslucentHandle is { } translucent)
+        {
+            _pendingRelease.Add(translucent);
+            entry.TranslucentHandle = null;
+        }
     }
 
     private bool NeedsMesh(ChunkPosition position, Entry entry)
@@ -287,5 +338,9 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
         public int MeshedVersion { get; set; } = -1;
 
         public MeshHandle? Handle { get; set; }
+
+        public MeshHandle? TranslucentHandle { get; set; }
     }
+
+    private readonly record struct TranslucentDraw(MeshHandle Handle, Vector3 Min, float DistanceSquared);
 }
