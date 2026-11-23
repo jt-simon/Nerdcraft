@@ -11,11 +11,16 @@ namespace Nerdcraft.Application.Meshing;
 /// <summary>
 /// Emits one quad per solid-block face whose neighbor is air. Vertices are chunk-local (0..16), so the
 /// renderer positions the chunk with a translation and large world coordinates stay precise.
+/// Ambient occlusion is baked into the vertex colors: each vertex is darkened by how many solid blocks
+/// crowd its corner, which makes individual blocks and creases visible.
 /// </summary>
 public sealed class CulledChunkMesher : IChunkMesher
 {
     // 16-bit indices cap a mesh at 65,536 vertices. A worst-case checkerboard chunk needs ~49,000.
     private const int MaxVertices = 65536;
+
+    // Brightness by ambient occlusion level: 0 is a corner boxed in by two sides, 3 is fully open.
+    private static readonly float[] AoBrightness = [0.55f, 0.7f, 0.85f, 1f];
 
     // Corners are counter-clockwise when seen from outside the cube.
     private static readonly Face[] Faces =
@@ -34,6 +39,7 @@ public sealed class CulledChunkMesher : IChunkMesher
     {
         ReadOnlySpan<BlockId> blocks = snapshot.Blocks;
         using MeshBuilder builder = new();
+        Span<int> ao = stackalloc int[4];
 
         for (int y = 0; y < Chunk.Size; y++)
         {
@@ -50,8 +56,17 @@ public sealed class CulledChunkMesher : IChunkMesher
                     Color color = BlockPalette.GetColor(block);
                     foreach (Face face in Faces)
                     {
-                        if (blocks[ChunkSnapshot.Index(x + face.Dx, y + face.Dy, z + face.Dz)].IsAir
-                            && !builder.TryAddQuad(x, y, z, face, color))
+                        if (!blocks[ChunkSnapshot.Index(x + face.Dx, y + face.Dy, z + face.Dz)].IsAir)
+                        {
+                            continue;
+                        }
+
+                        for (int corner = 0; corner < 4; corner++)
+                        {
+                            ao[corner] = OcclusionLevel(blocks, x, y, z, face, corner);
+                        }
+
+                        if (!builder.TryAddQuad(x, y, z, face, color, ao))
                         {
                             return builder.Build();
                         }
@@ -63,7 +78,46 @@ public sealed class CulledChunkMesher : IChunkMesher
         return builder.Build();
     }
 
-    private sealed record Face(int Dx, int Dy, int Dz, float Shade, int[] Corners);
+    // Ambient occlusion for one corner of a face. In the layer just outside the face, the two blocks beside the
+    // corner (along the face's two tangent axes) and the block diagonal to it decide how crowded it is.
+    // Returns 0 (darkest) to 3 (open).
+    private static int OcclusionLevel(ReadOnlySpan<BlockId> blocks, int x, int y, int z, Face face, int corner)
+    {
+        // +1 when this corner lies on the positive side of the face along each tangent axis, otherwise -1.
+        int signU = (face.Corners[(corner * 3) + face.UAxis] * 2) - 1;
+        int signV = (face.Corners[(corner * 3) + face.VAxis] * 2) - 1;
+        (int ux, int uy, int uz) = AxisStep(face.UAxis, signU);
+        (int vx, int vy, int vz) = AxisStep(face.VAxis, signV);
+
+        int bx = x + face.Dx;
+        int by = y + face.Dy;
+        int bz = z + face.Dz;
+        bool sideU = !blocks[ChunkSnapshot.Index(bx + ux, by + uy, bz + uz)].IsAir;
+        bool sideV = !blocks[ChunkSnapshot.Index(bx + vx, by + vy, bz + vz)].IsAir;
+        bool diagonal = !blocks[ChunkSnapshot.Index(bx + ux + vx, by + uy + vy, bz + uz + vz)].IsAir;
+
+        if (sideU && sideV)
+        {
+            return 0; // The diagonal is hidden behind the two sides; fully boxed in either way.
+        }
+
+        return 3 - ((sideU ? 1 : 0) + (sideV ? 1 : 0) + (diagonal ? 1 : 0));
+    }
+
+    private static (int X, int Y, int Z) AxisStep(int axis, int sign) => axis switch
+    {
+        0 => (sign, 0, 0),
+        1 => (0, sign, 0),
+        _ => (0, 0, sign),
+    };
+
+    private sealed record Face(int Dx, int Dy, int Dz, float Shade, int[] Corners)
+    {
+        // The two axes (0 = X, 1 = Y, 2 = Z) lying in the face's plane, used to find a corner's neighbors.
+        public int UAxis => Dx != 0 ? 1 : 0;
+
+        public int VAxis => Dz != 0 ? 1 : 2;
+    }
 
     private sealed class MeshBuilder : IDisposable
     {
@@ -74,19 +128,20 @@ public sealed class CulledChunkMesher : IChunkMesher
         private int _vertexCount;
         private int _indexCount;
 
-        public bool TryAddQuad(int x, int y, int z, Face face, Color color)
+        public bool TryAddQuad(int x, int y, int z, Face face, Color color, ReadOnlySpan<int> ao)
         {
             if (_vertexCount + 4 > MaxVertices)
             {
                 return false;
             }
 
-            byte r = (byte)(color.R * face.Shade);
-            byte g = (byte)(color.G * face.Shade);
-            byte b = (byte)(color.B * face.Shade);
-
             for (int corner = 0; corner < 4; corner++)
             {
+                float shade = face.Shade * AoBrightness[ao[corner]];
+                byte r = (byte)(color.R * shade);
+                byte g = (byte)(color.G * shade);
+                byte b = (byte)(color.B * shade);
+
                 int p = (_vertexCount + corner) * 3;
                 _positions[p] = x + face.Corners[corner * 3];
                 _positions[p + 1] = y + face.Corners[(corner * 3) + 1];
@@ -102,13 +157,20 @@ public sealed class CulledChunkMesher : IChunkMesher
                 _colors[c + 3] = color.A;
             }
 
+            // Split the quad along the diagonal whose corners are darker in total. Splitting along the other one
+            // makes a single dark corner bleed across a lopsided triangle.
+            bool flip = ao[0] + ao[2] > ao[1] + ao[3];
             ushort first = (ushort)_vertexCount;
-            _indices[_indexCount++] = first;
-            _indices[_indexCount++] = (ushort)(first + 1);
-            _indices[_indexCount++] = (ushort)(first + 2);
-            _indices[_indexCount++] = first;
-            _indices[_indexCount++] = (ushort)(first + 2);
-            _indices[_indexCount++] = (ushort)(first + 3);
+            ushort i0 = flip ? (ushort)(first + 1) : first;
+            ushort i1 = flip ? (ushort)(first + 2) : (ushort)(first + 1);
+            ushort i2 = flip ? (ushort)(first + 3) : (ushort)(first + 2);
+            ushort i3 = flip ? first : (ushort)(first + 3);
+            _indices[_indexCount++] = i0;
+            _indices[_indexCount++] = i1;
+            _indices[_indexCount++] = i2;
+            _indices[_indexCount++] = i0;
+            _indices[_indexCount++] = i2;
+            _indices[_indexCount++] = i3;
             _vertexCount += 4;
             return true;
         }

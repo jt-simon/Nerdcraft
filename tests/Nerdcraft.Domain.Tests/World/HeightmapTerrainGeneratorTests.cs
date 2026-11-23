@@ -134,6 +134,127 @@ public class HeightmapTerrainGeneratorTests
         }
     }
 
+    // Pins the exact terrain of a fixed region. A failure means the world every seed generates has changed (noise
+    // library update, tuning constant, layer order). If that is intended, update ExpectedRegionHash and add a
+    // CHANGELOG entry; otherwise fix the regression. Never update it just to make the test pass.
+    [Fact]
+    public void Generate_FixedSeedRegion_MatchesRecordedHash()
+    {
+        const ulong ExpectedRegionHash = 7417564496357569455UL;
+        HeightmapTerrainGenerator generator = new(1337, WorldBounds.Default);
+        ChunkPosition[] region =
+        [
+            new(0, 0, 0), new(5, -1, -3), new(2, -3, 2), new(0, -4, 0), new(40, 2, -17), new(-9, 5, 12),
+        ];
+
+        // FNV-1a over every block id of every chunk, in order.
+        ulong hash = 14695981039346656037UL;
+        BlockId[] blocks = new BlockId[Chunk.Volume];
+        foreach (ChunkPosition chunk in region)
+        {
+            generator.Generate(chunk, blocks);
+            foreach (BlockId block in blocks)
+            {
+                hash = (hash ^ block.Value) * 1099511628211UL;
+            }
+        }
+
+        Assert.Equal(ExpectedRegionHash, hash);
+    }
+
+    [Fact]
+    public void Generate_DeepUnderground_HasCavesButStaysMostlySolid()
+    {
+        WorldBounds bounds = WorldBounds.Default;
+        HeightmapTerrainGenerator generator = new(1337, bounds);
+        BlockId[] blocks = new BlockId[Chunk.Volume];
+        int total = 0;
+        int air = 0;
+
+        for (int cz = -3; cz < 3; cz++)
+        {
+            for (int cx = -3; cx < 3; cx++)
+            {
+                for (int cy = -3; cy <= -1; cy++)
+                {
+                    ChunkPosition chunk = new(cx, cy, cz);
+                    generator.Generate(chunk, blocks);
+                    BlockPosition origin = chunk.Origin;
+                    for (int z = 0; z < Chunk.Size; z++)
+                    {
+                        for (int x = 0; x < Chunk.Size; x++)
+                        {
+                            int surface = generator.SurfaceHeight(origin.X + x, origin.Z + z);
+                            for (int y = 0; y < Chunk.Size; y++)
+                            {
+                                // Deep enough that a hole here is a cave, not a surface opening or the bedrock floor.
+                                if (origin.Y + y >= bounds.MinY + 3 && origin.Y + y <= surface - 9)
+                                {
+                                    total++;
+                                    air += blocks[Chunk.Index(x, y, z)].IsAir ? 1 : 0;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Assert.InRange(air / (double)total, 0.02, 0.15);
+    }
+
+    [Fact]
+    public void Generate_BottomLayersAboveBedrock_AreNeverCarved()
+    {
+        WorldBounds bounds = WorldBounds.Default;
+        HeightmapTerrainGenerator generator = new(1337, bounds);
+        Dictionary<ChunkPosition, BlockId[]> cache = [];
+
+        for (int z = -48; z < 48; z++)
+        {
+            for (int x = -48; x < 48; x++)
+            {
+                Assert.Equal(BlockTypes.Bedrock, BlockAt(generator, cache, new BlockPosition(x, bounds.MinY, z)));
+                Assert.NotEqual(BlockTypes.Air, BlockAt(generator, cache, new BlockPosition(x, bounds.MinY + 1, z)));
+                Assert.NotEqual(BlockTypes.Air, BlockAt(generator, cache, new BlockPosition(x, bounds.MinY + 2, z)));
+            }
+        }
+    }
+
+    [Fact]
+    public void Generate_SurfaceBlocks_AreOpenedByCavesRarely()
+    {
+        HeightmapTerrainGenerator generator = new(1337, WorldBounds.Default);
+        Dictionary<ChunkPosition, BlockId[]> cache = [];
+        int columns = 0;
+        int openings = 0;
+
+        for (int z = -256; z < 256; z += 3)
+        {
+            for (int x = -256; x < 256; x += 3)
+            {
+                BlockPosition surface = new(x, generator.SurfaceHeight(x, z), z);
+                columns++;
+                openings += BlockAt(generator, cache, surface).IsAir ? 1 : 0;
+            }
+        }
+
+        Assert.True(openings > 0, "Caves never reach the surface.");
+        Assert.True(openings < columns / 50, $"{openings} of {columns} surface blocks are open; mouths should be occasional.");
+    }
+
+    private static BlockId BlockAt(HeightmapTerrainGenerator generator, Dictionary<ChunkPosition, BlockId[]> cache, BlockPosition position)
+    {
+        if (!cache.TryGetValue(position.ChunkPosition, out BlockId[]? blocks))
+        {
+            blocks = new BlockId[Chunk.Volume];
+            generator.Generate(position.ChunkPosition, blocks);
+            cache[position.ChunkPosition] = blocks;
+        }
+
+        return blocks[Chunk.Index(position.LocalX, position.LocalY, position.LocalZ)];
+    }
+
     [Fact]
     public void Constructor_MaxYNotAboveMinY_Throws()
         => Assert.Throws<ArgumentOutOfRangeException>(() => new HeightmapTerrainGenerator(1, new WorldBounds(5, 5)));

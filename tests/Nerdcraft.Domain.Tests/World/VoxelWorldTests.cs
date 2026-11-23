@@ -73,6 +73,23 @@ public class VoxelWorldTests
     }
 
     [Fact]
+    public void SetBlock_OnChunkCorner_BumpsDiagonalNeighborVersions()
+    {
+        ChunkPosition edgeNeighbor = new(1, 1, 0);
+        ChunkPosition cornerNeighbor = new(1, 1, 1);
+        VoxelWorld world = WorldWith(new ChunkPosition(0, 0, 0), edgeNeighbor, cornerNeighbor);
+        world.TryGetChunk(edgeNeighbor, out Chunk edge);
+        world.TryGetChunk(cornerNeighbor, out Chunk corner);
+        int edgeBefore = edge.Version;
+        int cornerBefore = corner.Version;
+
+        world.SetBlock(new BlockPosition(15, 15, 15), BlockTypes.Stone); // The +X +Y +Z corner of chunk (0,0,0).
+
+        Assert.Equal(edgeBefore + 1, edge.Version);
+        Assert.Equal(cornerBefore + 1, corner.Version);
+    }
+
+    [Fact]
     public void SetBlock_InChunkInterior_LeavesNeighborVersionUnchanged()
     {
         VoxelWorld world = WorldWith(new ChunkPosition(0, 0, 0), new ChunkPosition(1, 0, 0));

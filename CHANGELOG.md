@@ -8,16 +8,14 @@ contain breaking changes.
 
 ## [Unreleased]
 
-### Changed
-
-- Chunks with no solid blocks are no longer meshed, and terrain generation skips noise sampling for chunks above the highest possible surface.
-- `Chunk.IsEmpty` reports whether a chunk holds only air.
-
 ### Added
 
 - Procedural terrain from layered simplex noise (continents, mountain ranges and hills) around sea level at Y = 0.
 - World height range of Y = -50 to Y = 200, set by `GameSettings.Bounds`.
 - Bedrock block that always fills the bottom layer of the world.
+- `Chunk.IsEmpty`, which reports whether a chunk holds only air.
+- Ambient occlusion: block faces darken in corners and creases, including across chunk borders.
+- Caves: large caverns and winding tunnels carved from 3D noise, sealed below the surface except for occasional openings. The layers just above bedrock are never carved.
 
 ### Changed
 
@@ -25,6 +23,9 @@ contain breaking changes.
 - Default `GameSettings.RenderDistance` is now 12 chunks (was 6).
 - `HeightmapTerrainGenerator` now requires a `WorldBounds` argument in its constructor.
 - The camera starts 20 blocks above the terrain surface instead of at a fixed height. `NerdcraftGame`'s constructor takes an optional `spawnHeight`.
+- Chunks with no solid blocks are no longer meshed, and terrain generation skips noise sampling for chunks above the highest possible surface.
+- Terrain noise now uses FastNoiseLite (OpenSimplex2), vendored under `Nerdcraft.Domain`. Every seed generates a different world than before.
+- Terrain now sits higher: about 30% of columns are below sea level (Y = 0), down from about two-thirds, so a future ocean covers a minority of the map.
 
 ## [0.1.0] - 2026-11-22
 

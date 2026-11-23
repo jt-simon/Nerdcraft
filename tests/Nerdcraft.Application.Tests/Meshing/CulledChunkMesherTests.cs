@@ -20,6 +20,41 @@ public class CulledChunkMesherTests
         return new CulledChunkMesher().Mesh(snapshot);
     }
 
+    // Index of the vertex at a chunk-local position with the given face normal.
+    private static int FindVertex(MeshData mesh, Vector3 position, Vector3 normal)
+    {
+        ReadOnlySpan<float> p = mesh.Positions;
+        ReadOnlySpan<float> n = mesh.Normals;
+        for (int v = 0; v < mesh.VertexCount; v++)
+        {
+            if (new Vector3(p[v * 3], p[(v * 3) + 1], p[(v * 3) + 2]) == position
+                && new Vector3(n[v * 3], n[(v * 3) + 1], n[(v * 3) + 2]) == normal)
+            {
+                return v;
+            }
+        }
+
+        throw new InvalidOperationException($"No vertex at {position} facing {normal}.");
+    }
+
+    private static int Red(MeshData mesh, int vertex) => mesh.Colors[vertex * 4];
+
+    private static bool SharesATriangle(MeshData mesh, int first, int second)
+    {
+        ReadOnlySpan<ushort> indices = mesh.Indices;
+        for (int t = 0; t < indices.Length; t += 3)
+        {
+            bool hasFirst = indices[t] == first || indices[t + 1] == first || indices[t + 2] == first;
+            bool hasSecond = indices[t] == second || indices[t + 1] == second || indices[t + 2] == second;
+            if (hasFirst && hasSecond)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     [Fact]
     public void Mesh_SingleBlock_EmitsSixFaces()
     {
@@ -105,6 +140,50 @@ public class CulledChunkMesherTests
 
         static Vector3 At(ReadOnlySpan<float> data, int vertex)
             => new(data[vertex * 3], data[(vertex * 3) + 1], data[(vertex * 3) + 2]);
+    }
+
+    [Fact]
+    public void Mesh_BlockBesideWall_DarkensVerticesAgainstTheWall()
+    {
+        VoxelWorld world = TestWorlds.WithEmptyChunks(Origin);
+        world.SetBlock(new BlockPosition(5, 5, 5), BlockTypes.Stone);
+        world.SetBlock(new BlockPosition(6, 6, 5), BlockTypes.Stone); // Rises beside the +X edge of the first block's top.
+
+        using MeshData mesh = MeshChunk(world, Origin);
+
+        int open = Red(mesh, FindVertex(mesh, new Vector3(5, 6, 5), Vector3.UnitY));
+        int againstWall = Red(mesh, FindVertex(mesh, new Vector3(6, 6, 5), Vector3.UnitY));
+        Assert.True(againstWall < open, $"Vertex against the wall ({againstWall}) should be darker than the open one ({open}).");
+    }
+
+    [Fact]
+    public void Mesh_BlockOnlyDiagonalInNeighborChunk_StillDarkensTheCorner()
+    {
+        // The only occluder is across a chunk corner, so this fails unless snapshots copy edge and corner neighbors.
+        ChunkPosition diagonal = new(1, 1, 1);
+        VoxelWorld world = TestWorlds.WithEmptyChunks(Origin, diagonal);
+        world.SetBlock(new BlockPosition(15, 15, 15), BlockTypes.Stone);
+        world.SetBlock(new BlockPosition(16, 16, 16), BlockTypes.Stone);
+
+        using MeshData mesh = MeshChunk(world, Origin);
+
+        int shadowed = Red(mesh, FindVertex(mesh, new Vector3(16, 16, 16), Vector3.UnitX));
+        int open = Red(mesh, FindVertex(mesh, new Vector3(16, 15, 15), Vector3.UnitX));
+        Assert.True(shadowed < open, $"Corner beside the diagonal chunk ({shadowed}) should be darker than the open one ({open}).");
+    }
+
+    [Fact]
+    public void Mesh_QuadWithOneDarkCorner_SplitsAlongTheDiagonalThroughIt()
+    {
+        VoxelWorld world = TestWorlds.WithEmptyChunks(Origin);
+        world.SetBlock(new BlockPosition(5, 5, 5), BlockTypes.Stone);
+        world.SetBlock(new BlockPosition(6, 6, 6), BlockTypes.Stone); // Touches only the top face's (6, 6, 6) corner.
+
+        using MeshData mesh = MeshChunk(world, Origin);
+
+        int dark = FindVertex(mesh, new Vector3(6, 6, 6), Vector3.UnitY);
+        int opposite = FindVertex(mesh, new Vector3(5, 6, 5), Vector3.UnitY);
+        Assert.True(SharesATriangle(mesh, dark, opposite), "The shared edge of the two triangles should run through the dark corner.");
     }
 
     [Fact]

@@ -34,8 +34,8 @@ public sealed class VoxelWorld
     }
 
     /// <summary>
-    /// Sets a block in an already loaded chunk. When the block changes, neighboring chunks that share a face
-    /// with it are touched so their meshes are rebuilt. Chunks are created only by <see cref="LoadChunk"/>,
+    /// Sets a block in an already loaded chunk. When the block changes, neighboring chunks that share a face,
+    /// edge or corner with it are touched so their meshes are rebuilt. Chunks are created only by <see cref="LoadChunk"/>,
     /// so terrain generation can never overwrite an edit.
     /// </summary>
     /// <returns>False, changing nothing, when the chunk containing <paramref name="position"/> is not loaded.</returns>
@@ -57,17 +57,20 @@ public sealed class VoxelWorld
             return true;
         }
 
-        // A block on a chunk border changes the padded view of the neighbor on that side.
-        TouchNeighborIf(x == 0, chunkPosition, -1, 0, 0);
-        TouchNeighborIf(x == Chunk.Mask, chunkPosition, 1, 0, 0);
-        TouchNeighborIf(y == 0, chunkPosition, 0, -1, 0);
-        TouchNeighborIf(y == Chunk.Mask, chunkPosition, 0, 1, 0);
-        TouchNeighborIf(z == 0, chunkPosition, 0, 0, -1);
-        TouchNeighborIf(z == Chunk.Mask, chunkPosition, 0, 0, 1);
+        // A block on a chunk border changes the padded view of every neighbor it touches: the face neighbor on each
+        // side it lies against, plus the edge and corner neighbors when it lies against more than one.
+        TouchNeighbors(
+            chunkPosition,
+            x == 0 ? -1 : 0,
+            x == Chunk.Mask ? 1 : 0,
+            y == 0 ? -1 : 0,
+            y == Chunk.Mask ? 1 : 0,
+            z == 0 ? -1 : 0,
+            z == Chunk.Mask ? 1 : 0);
         return true;
     }
 
-    /// <summary>Installs generated blocks, creating the chunk if needed, and invalidates neighbor meshes.</summary>
+    /// <summary>Installs generated blocks, creating the chunk if needed, and invalidates the meshes of all 26 neighbors.</summary>
     public void LoadChunk(ChunkPosition position, ReadOnlySpan<BlockId> blocks)
     {
         if (!_chunks.TryGetValue(position, out Chunk? chunk))
@@ -77,12 +80,7 @@ public sealed class VoxelWorld
         }
 
         chunk.Load(blocks);
-        TouchNeighborIf(true, position, -1, 0, 0);
-        TouchNeighborIf(true, position, 1, 0, 0);
-        TouchNeighborIf(true, position, 0, -1, 0);
-        TouchNeighborIf(true, position, 0, 1, 0);
-        TouchNeighborIf(true, position, 0, 0, -1);
-        TouchNeighborIf(true, position, 0, 0, 1);
+        TouchNeighbors(position, -1, 1, -1, 1, -1, 1);
     }
 
     /// <summary>Removes a chunk; returns false if it was not loaded. Neighbors are not touched.</summary>
@@ -97,11 +95,21 @@ public sealed class VoxelWorld
         return true;
     }
 
-    private void TouchNeighborIf(bool condition, ChunkPosition origin, int dx, int dy, int dz)
+    // Touches every loaded neighbor whose offset lies in the given inclusive ranges, except the chunk itself.
+    private void TouchNeighbors(ChunkPosition origin, int minDx, int maxDx, int minDy, int maxDy, int minDz, int maxDz)
     {
-        if (condition && _chunks.TryGetValue(origin.Offset(dx, dy, dz), out Chunk? neighbor))
+        for (int dy = minDy; dy <= maxDy; dy++)
         {
-            neighbor.Touch();
+            for (int dz = minDz; dz <= maxDz; dz++)
+            {
+                for (int dx = minDx; dx <= maxDx; dx++)
+                {
+                    if ((dx | dy | dz) != 0 && _chunks.TryGetValue(origin.Offset(dx, dy, dz), out Chunk? neighbor))
+                    {
+                        neighbor.Touch();
+                    }
+                }
+            }
         }
     }
 }
