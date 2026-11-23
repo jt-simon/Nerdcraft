@@ -21,6 +21,27 @@ public class HeightmapTerrainGeneratorTests
     }
 
     [Fact]
+    public void GenerateColumn_FullBounds_MatchesGeneratingEachChunkSeparately()
+    {
+        WorldBounds bounds = WorldBounds.Default;
+        HeightmapTerrainGenerator generator = new(1337, bounds);
+        int rows = bounds.MaxChunkY - bounds.MinChunkY + 1;
+        BlockId[] column = new BlockId[rows * Chunk.Volume];
+        column.AsSpan().Fill(BlockTypes.Stone); // ensure every element is overwritten
+
+        generator.GenerateColumn(-5, 7, bounds.MinChunkY, bounds.MaxChunkY, column);
+
+        BlockId[] single = new BlockId[Chunk.Volume];
+        for (int row = 0; row < rows; row++)
+        {
+            generator.Generate(new ChunkPosition(-5, bounds.MinChunkY + row, 7), single);
+            Assert.True(
+                column.AsSpan(row * Chunk.Volume, Chunk.Volume).SequenceEqual(single),
+                $"Row {row} differs from the single-chunk result.");
+        }
+    }
+
+    [Fact]
     public void SurfaceHeight_DifferentSeeds_ProduceDifferentTerrain()
     {
         HeightmapTerrainGenerator first = new(1, WorldBounds.Default);

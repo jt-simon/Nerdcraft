@@ -18,7 +18,7 @@ namespace Nerdcraft.Application.Streaming;
 /// </summary>
 /// <param name="world">The world to fill with generated chunks.</param>
 /// <param name="queue">Source of background generation and meshing.</param>
-/// <param name="settings">Supplies render distance, world bounds and the per-frame upload budget.</param>
+/// <param name="settings">Supplies render distance, world bounds and the per-frame budgets for uploads, chunk installs and mesh requests.</param>
 public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameSettings settings)
 {
     private readonly Dictionary<ChunkPosition, Entry> _entries = [];
@@ -28,21 +28,36 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
     private readonly (int Dx, int Dz)[] _loadOffsets = BuildLoadOffsets(settings.RenderDistance);
     private (int X, int Z)? _lastCameraChunk;
 
-    /// <summary>Unloads chunks that left range, installs finished terrain, and requests new work around the camera. Makes no renderer calls.</summary>
+    // The scan in RequestWork only has new work to find after one of these changes: the camera crossing a chunk border,
+    // the world changing (Revision), or a mesh request finishing or being refused. Otherwise it is skipped.
+    private int _scannedRevision = -1;
+    private bool _rescan = true;
+
+    /// <summary>
+    /// Unloads chunks that left range, installs finished terrain, and requests new work around the camera. Makes no
+    /// renderer calls. Installs at most <see cref="GameSettings.MaxChunkInstallsPerFrame"/> chunks and starts at most
+    /// <see cref="GameSettings.MaxMeshRequestsPerFrame"/> mesh requests per call, so a burst of finished work spreads
+    /// over several frames.
+    /// </summary>
     /// <param name="cameraPosition">Camera position in world space.</param>
     public void Update(Vector3 cameraPosition)
     {
         int cameraX = FloorToChunk(cameraPosition.X);
         int cameraZ = FloorToChunk(cameraPosition.Z);
 
-        if (_lastCameraChunk != (cameraX, cameraZ))
+        bool cameraMoved = _lastCameraChunk != (cameraX, cameraZ);
+        if (cameraMoved)
         {
             _lastCameraChunk = (cameraX, cameraZ);
             UnloadDistantChunks(cameraX, cameraZ);
         }
 
         InstallGeneratedChunks();
-        RequestWork(cameraX, cameraZ);
+        if (cameraMoved || _rescan || world.Revision != _scannedRevision)
+        {
+            _scannedRevision = world.Revision;
+            _rescan = !RequestWork(cameraX, cameraZ);
+        }
     }
 
     /// <summary>Releases meshes that were replaced or unloaded, then uploads up to <see cref="GameSettings.MaxUploadsPerFrame"/> finished meshes. Meshes built from outdated chunk contents are discarded.</summary>
@@ -71,6 +86,7 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
             }
 
             entry.MeshRequestedVersion = null;
+            _rescan = true; // An edit made while this mesh was in flight was skipped by the scan; scan again to request the new mesh.
             if (chunk.Version != result.Version)
             {
                 continue; // Blocks changed while meshing; the next scan requests a fresh mesh.
@@ -175,21 +191,26 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
 
     private void InstallGeneratedChunks()
     {
-        while (queue.TryTakeGenerated(out GeneratedChunk result))
+        // Results beyond the budget stay queued for the next frame; stale ones are cheap and do not count.
+        int installed = 0;
+        while (installed < settings.MaxChunkInstallsPerFrame && queue.TryTakeGenerated(out GeneratedChunk result))
         {
             if (_entries.TryGetValue(result.Position, out Entry? entry) && !entry.Loaded)
             {
                 world.LoadChunk(result.Position, result.Blocks.AsSpan(0, Chunk.Volume));
                 entry.Loaded = true;
+                installed++;
             }
 
             ArrayPool<BlockId>.Shared.Return(result.Blocks);
         }
     }
 
-    // Walks columns nearest-first so the area around the camera fills in before the horizon.
-    private void RequestWork(int cameraX, int cameraZ)
+    // Walks columns nearest-first so the area around the camera fills in before the horizon. Returns false when the
+    // queue refused a request or the per-frame mesh budget ran out, so the walk stopped early and must run again.
+    private bool RequestWork(int cameraX, int cameraZ)
     {
+        int meshRequests = 0;
         foreach ((int dx, int dz) in _loadOffsets)
         {
             for (int y = settings.Bounds.MinChunkY; y <= settings.Bounds.MaxChunkY; y++)
@@ -198,12 +219,17 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
 
                 if (!_entries.TryGetValue(position, out Entry? entry))
                 {
-                    if (!queue.TryRequestGenerate(position))
+                    // A column is requested whole so its workers share the heightmap; every row gets an entry at once.
+                    if (!queue.TryRequestGenerateColumn(position.X, position.Z, settings.Bounds.MinChunkY, settings.Bounds.MaxChunkY))
                     {
-                        return;
+                        return false;
                     }
 
-                    _entries[position] = new Entry();
+                    for (int row = settings.Bounds.MinChunkY; row <= settings.Bounds.MaxChunkY; row++)
+                    {
+                        _entries[position with { Y = row }] = new Entry();
+                    }
+
                     continue;
                 }
 
@@ -217,14 +243,19 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
                     continue;
                 }
 
-                if (NeedsMesh(position, entry)
-                    && NeighborsSettled(position, cameraX, cameraZ)
-                    && !TryRequestMesh(position, entry))
+                if (NeedsMesh(position, entry) && NeighborsSettled(position, cameraX, cameraZ))
                 {
-                    return;
+                    if (meshRequests == settings.MaxMeshRequestsPerFrame || !TryRequestMesh(position, entry))
+                    {
+                        return false; // Over budget or refused: the scan stops here and runs again next frame.
+                    }
+
+                    meshRequests++;
                 }
             }
         }
+
+        return true;
     }
 
     // An all-air chunk emits no faces whatever its neighbors hold, so it needs no snapshot or mesh. If it was

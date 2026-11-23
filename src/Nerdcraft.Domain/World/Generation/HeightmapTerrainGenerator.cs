@@ -95,23 +95,64 @@ public sealed class HeightmapTerrainGenerator : ITerrainGenerator
 
     /// <inheritdoc/>
     public void Generate(ChunkPosition position, Span<BlockId> blocks)
+        => GenerateColumn(position.X, position.Z, position.Y, position.Y, blocks);
+
+    /// <inheritdoc/>
+    /// <remarks>Works out each column's surface height and materials once and reuses them for every row, which is most of the cost of a chunk.</remarks>
+    public void GenerateColumn(int chunkX, int chunkZ, int minChunkY, int maxChunkY, Span<BlockId> blocks)
     {
-        BlockPosition origin = position.Origin;
-        blocks.Clear();
-        if (origin.Y > _maxSurface)
+        if (maxChunkY < minChunkY)
         {
             return;
         }
 
-        int waterTop = Math.Min(SeaLevel, _bounds.MaxY);
+        int rows = maxChunkY - minChunkY + 1;
+        blocks[..(rows * Chunk.Volume)].Clear();
+        if ((minChunkY << Chunk.SizeShift) > _maxSurface)
+        {
+            return;
+        }
+
+        int originX = chunkX << Chunk.SizeShift;
+        int originZ = chunkZ << Chunk.SizeShift;
         Span<int> surfaces = stackalloc int[Chunk.Size * Chunk.Size];
+        Span<BlockId> tops = stackalloc BlockId[surfaces.Length];
+        Span<BlockId> fillers = stackalloc BlockId[surfaces.Length];
         for (int z = 0; z < Chunk.Size; z++)
         {
             for (int x = 0; x < Chunk.Size; x++)
             {
-                int surface = SurfaceHeight(origin.X + x, origin.Z + z);
-                surfaces[(z * Chunk.Size) + x] = surface;
-                (BlockId top, BlockId filler) = SurfaceMaterials(surface, origin.X + x, origin.Z + z);
+                int surface = SurfaceHeight(originX + x, originZ + z);
+                int column = (z * Chunk.Size) + x;
+                surfaces[column] = surface;
+                (tops[column], fillers[column]) = SurfaceMaterials(surface, originX + x, originZ + z);
+            }
+        }
+
+        for (int row = 0; row < rows; row++)
+        {
+            BlockPosition origin = new(originX, (minChunkY + row) << Chunk.SizeShift, originZ);
+            if (origin.Y > _maxSurface)
+            {
+                break; // Rows above are all air, and already cleared.
+            }
+
+            Span<BlockId> rowBlocks = blocks.Slice(row * Chunk.Volume, Chunk.Volume);
+            FillRow(origin, surfaces, tops, fillers, rowBlocks);
+            CarveCaves(origin, surfaces, rowBlocks);
+        }
+    }
+
+    // Fills one chunk row from the column's surface heights and materials: bedrock, stone, filler, the top block, then water.
+    private void FillRow(BlockPosition origin, ReadOnlySpan<int> surfaces, ReadOnlySpan<BlockId> tops, ReadOnlySpan<BlockId> fillers, Span<BlockId> blocks)
+    {
+        int waterTop = Math.Min(SeaLevel, _bounds.MaxY);
+        for (int z = 0; z < Chunk.Size; z++)
+        {
+            for (int x = 0; x < Chunk.Size; x++)
+            {
+                int column = (z * Chunk.Size) + x;
+                int surface = surfaces[column];
                 for (int y = 0; y < Chunk.Size; y++)
                 {
                     int worldY = origin.Y + y;
@@ -127,14 +168,12 @@ public sealed class HeightmapTerrainGenerator : ITerrainGenerator
 
                     blocks[Chunk.Index(x, y, z)] = worldY == _bounds.MinY ? BlockTypes.Bedrock
                         : worldY > surface ? BlockTypes.Water
-                        : worldY == surface ? top
-                        : worldY >= surface - DirtDepth ? filler
+                        : worldY == surface ? tops[column]
+                        : worldY >= surface - DirtDepth ? fillers[column]
                         : BlockTypes.Stone;
                 }
             }
         }
-
-        CarveCaves(origin, surfaces, blocks);
     }
 
     /// <summary>

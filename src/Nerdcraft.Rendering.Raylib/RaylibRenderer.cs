@@ -24,14 +24,16 @@ public sealed unsafe class RaylibRenderer : IRenderer, IDisposable
         => Raylib_cs.Raylib.GetRenderWidth() / (float)Math.Max(1, Raylib_cs.Raylib.GetRenderHeight());
 
     /// <inheritdoc/>
-    /// <remarks>Retains only the index data on the CPU after upload; the vertex data lives on the GPU.</remarks>
+    /// <remarks>
+    /// Retains only the index data on the CPU after upload; the vertex data lives on the GPU. Normals are not uploaded:
+    /// the default material's shader does not read them, so they would only cost video memory and upload time.
+    /// </remarks>
     public MeshHandle UploadMesh(MeshData data)
     {
         Mesh mesh = default;
         mesh.VertexCount = data.VertexCount;
         mesh.TriangleCount = data.IndexCount / 3;
         mesh.Vertices = CopyToRaylibMemory(data.Positions);
-        mesh.Normals = CopyToRaylibMemory(data.Normals);
         mesh.Colors = CopyToRaylibMemory(data.Colors);
         mesh.Indices = CopyToRaylibMemory(data.Indices);
 
@@ -40,10 +42,8 @@ public sealed unsafe class RaylibRenderer : IRenderer, IDisposable
         // The GPU now holds the data; drop the large CPU copies (matters on integrated graphics).
         // Indices must stay: DrawMesh draws non-indexed when mesh.Indices is null. UnloadMesh frees them.
         Raylib_cs.Raylib.MemFree(mesh.Vertices);
-        Raylib_cs.Raylib.MemFree(mesh.Normals);
         Raylib_cs.Raylib.MemFree(mesh.Colors);
         mesh.Vertices = null;
-        mesh.Normals = null;
         mesh.Colors = null;
 
         int id = ++_nextId;

@@ -16,6 +16,14 @@ public sealed class VoxelWorld
     // load of a chunk and results from an earlier load can never be mistaken for the current one.
     private int _versionFloor;
 
+    /// <summary>
+    /// Increases whenever a chunk is loaded or unloaded or a block changes, so a caller can tell whether anything it
+    /// derived from the world since it last looked may be out of date. It wraps around after <see cref="int.MaxValue"/>
+    /// changes, so compare it only for inequality. It is local to this instance, so it is not a save or network
+    /// version, and it only reflects changes made through this class, not directly on a <see cref="Chunk"/>.
+    /// </summary>
+    public int Revision { get; private set; }
+
     /// <summary>Positions of every chunk currently loaded. A live view: do not load or unload chunks while enumerating.</summary>
     public IReadOnlyCollection<ChunkPosition> LoadedChunks => _chunks.Keys;
 
@@ -57,6 +65,8 @@ public sealed class VoxelWorld
             return true;
         }
 
+        Revision++;
+
         // A block on a chunk border changes the padded view of every neighbor it touches: the face neighbor on each
         // side it lies against, plus the edge and corner neighbors when it lies against more than one.
         TouchNeighbors(
@@ -80,6 +90,7 @@ public sealed class VoxelWorld
         }
 
         chunk.Load(blocks);
+        Revision++;
         TouchNeighbors(position, -1, 1, -1, 1, -1, 1);
     }
 
@@ -92,6 +103,7 @@ public sealed class VoxelWorld
         }
 
         _versionFloor = Math.Max(_versionFloor, chunk.Version + 1);
+        Revision++;
         return true;
     }
 

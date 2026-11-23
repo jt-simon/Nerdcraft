@@ -32,12 +32,15 @@ translucent is a presentation choice, so it lives in `BlockPalette`, not in the 
 - **The main thread owns the GPU.** Every `IRenderer` call happens inside `NerdcraftGame.Render`, on the
   thread that calls it. Background workers never touch the renderer.
 - **CPU-heavy work runs on workers.** `ChunkPipeline` generates terrain and meshes chunks on up to 4 tasks
-  fed by a bounded `Channel`. Results return on channels and are drained by the main thread.
+  fed by a bounded `Channel`. Terrain is generated a whole column (every chunk row at one X and Z) per job,
+  so the heightmap is computed once per column rather than once per chunk. Results return on channels and are drained by the main thread.
 - **Workers never see live chunk data.** Meshing runs on a pooled `ChunkSnapshot` (the chunk plus a
   one-block border from all 26 neighbors, so ambient occlusion works across chunk edges and corners).
   Each chunk has a `Version`; a mesh built from an outdated version is discarded and rebuilt.
-- **Per-frame work is bounded.** At most `GameSettings.MaxUploadsPerFrame` meshes are uploaded per frame,
-  chunks outside the camera frustum aren't drawn, and buffers are pooled to keep the GC quiet.
+- **Per-frame work is bounded.** Each frame installs at most `GameSettings.MaxChunkInstallsPerFrame` generated
+  chunks, starts at most `MaxMeshRequestsPerFrame` mesh requests and uploads at most `MaxUploadsPerFrame` meshes;
+  the rest wait for the next frame. Chunks outside the camera frustum aren't drawn, and buffers are pooled to keep
+  the GC quiet.
 - `async`/`await` is used for worker loops and shutdown only; the per-frame path is synchronous.
 
 `GameSettings.RenderDistance` is the main knob for weak hardware.

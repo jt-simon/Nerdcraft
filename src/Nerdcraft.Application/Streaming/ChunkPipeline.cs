@@ -53,12 +53,15 @@ public sealed class ChunkPipeline : IChunkWorkQueue, IAsyncDisposable
     }
 
     /// <inheritdoc/>
-    public bool TryRequestGenerate(ChunkPosition position)
-        => _requests.Writer.TryWrite(new ChunkJob(position, null));
+    public bool TryRequestGenerateColumn(int chunkX, int chunkZ, int minChunkY, int maxChunkY)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxChunkY, minChunkY);
+        return _requests.Writer.TryWrite(new ChunkJob(new ChunkPosition(chunkX, minChunkY, chunkZ), null, maxChunkY));
+    }
 
     /// <inheritdoc/>
     public bool TryRequestMesh(ChunkSnapshot snapshot)
-        => _requests.Writer.TryWrite(new ChunkJob(snapshot.Position, snapshot));
+        => _requests.Writer.TryWrite(new ChunkJob(snapshot.Position, snapshot, snapshot.Position.Y));
 
     /// <inheritdoc/>
     /// <exception cref="Exception">Rethrows the exception that stopped a worker, if one did.</exception>
@@ -117,9 +120,7 @@ public sealed class ChunkPipeline : IChunkWorkQueue, IAsyncDisposable
     {
         if (job.Snapshot is null)
         {
-            BlockId[] blocks = ArrayPool<BlockId>.Shared.Rent(Chunk.Volume);
-            _generator.Generate(job.Position, blocks.AsSpan(0, Chunk.Volume));
-            _generated.Writer.TryWrite(new GeneratedChunk(job.Position, blocks));
+            GenerateColumn(job);
             return;
         }
 
@@ -133,7 +134,30 @@ public sealed class ChunkPipeline : IChunkWorkQueue, IAsyncDisposable
         }
     }
 
+    // Generates the whole column into one scratch buffer, then hands each row back in its own pooled array.
+    private void GenerateColumn(ChunkJob job)
+    {
+        int rows = job.MaxChunkY - job.Position.Y + 1;
+        int length = rows * Chunk.Volume;
+        BlockId[] scratch = ArrayPool<BlockId>.Shared.Rent(length);
+        try
+        {
+            _generator.GenerateColumn(job.Position.X, job.Position.Z, job.Position.Y, job.MaxChunkY, scratch.AsSpan(0, length));
+            for (int row = 0; row < rows; row++)
+            {
+                BlockId[] blocks = ArrayPool<BlockId>.Shared.Rent(Chunk.Volume);
+                scratch.AsSpan(row * Chunk.Volume, Chunk.Volume).CopyTo(blocks);
+                _generated.Writer.TryWrite(new GeneratedChunk(job.Position with { Y = job.Position.Y + row }, blocks));
+            }
+        }
+        finally
+        {
+            ArrayPool<BlockId>.Shared.Return(scratch);
+        }
+    }
+
     private void ThrowIfFaulted() => _fault?.Throw();
 
-    private readonly record struct ChunkJob(ChunkPosition Position, ChunkSnapshot? Snapshot);
+    // A generate job (Snapshot is null) covers the column from Position.Y up to MaxChunkY; a mesh job covers Position only.
+    private readonly record struct ChunkJob(ChunkPosition Position, ChunkSnapshot? Snapshot, int MaxChunkY);
 }
