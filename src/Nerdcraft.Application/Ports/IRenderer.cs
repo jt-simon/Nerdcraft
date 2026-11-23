@@ -39,8 +39,9 @@ public interface IRenderer
     void DrawTranslucentMesh(MeshHandle handle, Matrix4x4 transform);
 
     /// <summary>Finishes the frame and presents it.</summary>
-    /// <param name="debugCameraPosition">
-    /// When set, draws the debug overlay (FPS and this camera position); when <see langword="null"/>, draws no overlay.
+    /// <param name="debug">
+    /// When set, draws the debug overlay (FPS, the camera position and the draw statistics); when
+    /// <see langword="null"/>, draws no overlay.
     /// </param>
-    void EndFrame(Vector3? debugCameraPosition);
+    void EndFrame(DebugOverlay? debug);
 }

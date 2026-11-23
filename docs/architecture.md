@@ -22,8 +22,11 @@ Nerdcraft.Desktop            composition root (the only place a renderer meets t
 Math uses `System.Numerics`. The core produces plain `MeshData` (positions, normals, colors, indices) and
 its own `Color`, so no engine types leak inward.
 
-Each chunk meshes to a `ChunkMesh`: an opaque `MeshData` and a translucent one (water). `ChunkStreamer.Draw`
-submits every opaque mesh first with `IRenderer.DrawMesh`, then the translucent meshes from farthest to
+Each chunk meshes to a `ChunkMesh`: an opaque `MeshData`, a translucent one (water), and a `ChunkVisibility`
+saying which pairs of the chunk's faces are joined by open space (computed on the worker, by flood fill).
+`ChunkStreamer.Draw` walks outward from the camera's chunk through those connections, inside the frustum, so chunks
+hidden behind solid terrain are skipped; without a camera chunk it falls back to the frustum alone. It
+submits every visible opaque mesh first with `IRenderer.DrawMesh`, then the translucent meshes from farthest to
 nearest with `IRenderer.DrawTranslucentMesh`, which blends and does not write depth. Which blocks are
 translucent is a presentation choice, so it lives in `BlockPalette`, not in the domain.
 
@@ -39,7 +42,7 @@ translucent is a presentation choice, so it lives in `BlockPalette`, not in the 
   Each chunk has a `Version`; a mesh built from an outdated version is discarded and rebuilt.
 - **Per-frame work is bounded.** Each frame installs at most `GameSettings.MaxChunkInstallsPerFrame` generated
   chunks, starts at most `MaxMeshRequestsPerFrame` mesh requests and uploads at most `MaxUploadsPerFrame` meshes;
-  the rest wait for the next frame. Chunks outside the camera frustum aren't drawn, and buffers are pooled to keep
+  the rest wait for the next frame. Chunks outside the camera frustum or hidden behind solid terrain aren't drawn, and buffers are pooled to keep
   the GC quiet.
 - `async`/`await` is used for worker loops and shutdown only; the per-frame path is synchronous.
 

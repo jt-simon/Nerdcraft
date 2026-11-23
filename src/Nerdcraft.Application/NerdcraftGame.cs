@@ -83,8 +83,8 @@ public sealed class NerdcraftGame : IAsyncDisposable
         Frustum frustum = Frustum.FromViewProjection(view.CreateViewProjection(renderer.AspectRatio));
 
         renderer.BeginFrame(view, SkyColor);
-        _streamer.Draw(renderer, frustum, view.Position);
-        renderer.EndFrame(_showDebug ? _camera.Position : null);
+        DrawStats stats = _streamer.Draw(renderer, frustum, view.Position);
+        renderer.EndFrame(_showDebug ? new DebugOverlay(_camera.Position, stats) : null);
     }
 
     /// <summary>Stops background workers (when the work queue is disposable) and waits for them to finish.</summary>

@@ -15,12 +15,18 @@ public sealed class FakeRenderer : IRenderer
 
     public List<MeshHandle> Uploads { get; } = [];
 
+    /// <summary>Vertex count of each uploaded mesh, by handle.</summary>
+    public Dictionary<MeshHandle, int> VertexCounts { get; } = [];
+
     public List<MeshHandle> Releases { get; } = [];
 
     public List<MeshHandle> Draws { get; } = [];
 
-    /// <summary>Camera position passed to each <see cref="EndFrame"/>; null when the debug overlay was hidden.</summary>
-    public List<Vector3?> DebugOverlays { get; } = [];
+    /// <summary>World position of each opaque draw's chunk, in submission order.</summary>
+    public List<Vector3> DrawOrigins { get; } = [];
+
+    /// <summary>Overlay passed to each <see cref="EndFrame"/>; null when the debug overlay was hidden.</summary>
+    public List<DebugOverlay?> DebugOverlays { get; } = [];
 
     public List<MeshHandle> TranslucentDraws { get; } = [];
 
@@ -31,6 +37,7 @@ public sealed class FakeRenderer : IRenderer
     {
         MeshHandle handle = new(++_nextHandle);
         Uploads.Add(handle);
+        VertexCounts[handle] = mesh.VertexCount;
         return handle;
     }
 
@@ -43,6 +50,7 @@ public sealed class FakeRenderer : IRenderer
     public void DrawMesh(MeshHandle handle, Matrix4x4 transform)
     {
         Draws.Add(handle);
+        DrawOrigins.Add(transform.Translation);
         AllDraws.Add((handle, false));
     }
 
@@ -52,5 +60,5 @@ public sealed class FakeRenderer : IRenderer
         AllDraws.Add((handle, true));
     }
 
-    public void EndFrame(Vector3? debugCameraPosition) => DebugOverlays.Add(debugCameraPosition);
+    public void EndFrame(DebugOverlay? debug) => DebugOverlays.Add(debug);
 }

@@ -51,7 +51,7 @@ public class NerdcraftGameTests
         game.Update(new InputState(Vector3.Zero, Vector2.Zero, false, ToggleDebug: true), 0.016f);
         game.Render(renderer);
 
-        Assert.Equal(new Vector3(8f, 100f, 8f), renderer.DebugOverlays[^1]);
+        Assert.Equal(new Vector3(8f, 100f, 8f), renderer.DebugOverlays[^1]?.CameraPosition);
     }
 
     [Fact]

@@ -44,6 +44,7 @@ public sealed class CulledChunkMesher : IChunkMesher
         using MeshBuilder opaque = new();
         using MeshBuilder translucent = new();
         Span<int> ao = stackalloc int[4];
+        ChunkVisibility visibility = ChunkVisibility.Compute(snapshot);
 
         for (int y = 0; y < Chunk.Size; y++)
         {
@@ -76,14 +77,14 @@ public sealed class CulledChunkMesher : IChunkMesher
 
                         if (!builder.TryAddQuad(x, y, z, face, color, ao))
                         {
-                            return new ChunkMesh(opaque.Build(), translucent.Build());
+                            return new ChunkMesh(opaque.Build(), translucent.Build(), visibility);
                         }
                     }
                 }
             }
         }
 
-        return new ChunkMesh(opaque.Build(), translucent.Build());
+        return new ChunkMesh(opaque.Build(), translucent.Build(), visibility);
     }
 
     // Ambient occlusion for one corner of a face. In the layer just outside the face, the two blocks beside the

@@ -87,15 +87,22 @@ public sealed unsafe class RaylibRenderer : IRenderer, IDisposable
     }
 
     /// <inheritdoc/>
-    /// <remarks>Draws the FPS counter and camera position when <paramref name="debugCameraPosition"/> is set.</remarks>
-    public void EndFrame(Vector3? debugCameraPosition)
+    /// <remarks>
+    /// Draws the FPS counter, camera position, chunks drawn / meshed and vertices drawn (in millions) when
+    /// <paramref name="debug"/> is set.
+    /// </remarks>
+    public void EndFrame(DebugOverlay? debug)
     {
         Raylib_cs.Raylib.EndMode3D();
-        if (debugCameraPosition is Vector3 position)
+        if (debug is { } overlay)
         {
+            Vector3 position = overlay.CameraPosition;
             Raylib_cs.Raylib.DrawFPS(10, 10);
             Raylib_cs.Raylib.DrawText(
                 $"Pos: {position.X:F1} {position.Y:F1} {position.Z:F1}", 10, 34, 20, Color.White);
+            Raylib_cs.Raylib.DrawText(
+                $"Chunks: {overlay.Stats.ChunksDrawn} / {overlay.Stats.ChunksMeshed}  Verts: {overlay.Stats.VerticesDrawn / 1_000_000d:F2}M",
+                10, 58, 20, Color.White);
         }
 
         Raylib_cs.Raylib.EndDrawing();
