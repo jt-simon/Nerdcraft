@@ -2,12 +2,13 @@
 
 using System.Numerics;
 
-using Nerdcraft.Application.Camera;
 using Nerdcraft.Application.Input;
 using Nerdcraft.Application.Meshing;
+using Nerdcraft.Application.Player;
 using Nerdcraft.Application.Ports;
 using Nerdcraft.Application.Rendering;
 using Nerdcraft.Application.Streaming;
+using Nerdcraft.Domain.Entities;
 using Nerdcraft.Domain.World;
 using Nerdcraft.Domain.World.Generation;
 
@@ -21,11 +22,8 @@ public sealed class NerdcraftGame : IAsyncDisposable
 {
     private static readonly Color SkyColor = new(135, 190, 235);
 
-    // Blocks between the terrain surface and the camera at the spawn column.
-    private const int SpawnClearance = 20;
-
     private readonly GameSettings _settings;
-    private readonly FlyCamera _camera;
+    private readonly LocalPlayer _player;
     private readonly ChunkStreamer _streamer;
     private readonly IAsyncDisposable? _workQueue;
     private readonly float _farPlane;
@@ -35,7 +33,7 @@ public sealed class NerdcraftGame : IAsyncDisposable
     /// <param name="settings">Configuration for streaming and the camera.</param>
     /// <param name="workQueue">Background worker port used for terrain generation and meshing.</param>
     /// <param name="world">The world to populate and draw.</param>
-    /// <param name="spawnHeight">World Y at which the camera starts, above the block column at X = 8, Z = 8. Must clear the terrain there.</param>
+    /// <param name="spawnHeight">World Y of the player's feet at the start, above the block column at X = 8, Z = 8. Must clear the terrain there; the player holds still until the chunk under them has loaded, then falls.</param>
     /// <exception cref="ArgumentOutOfRangeException">A value in <paramref name="settings"/> is out of range.</exception>
     public NerdcraftGame(GameSettings settings, IChunkWorkQueue workQueue, VoxelWorld world, float spawnHeight = 56f)
     {
@@ -43,13 +41,14 @@ public sealed class NerdcraftGame : IAsyncDisposable
         _settings = settings;
         _workQueue = workQueue as IAsyncDisposable;
         _streamer = new ChunkStreamer(world, workQueue, settings);
-        _camera = new FlyCamera(new Vector3(8f, spawnHeight, 8f), yawDegrees: 0f, pitchDegrees: -25f);
+        _player = new LocalPlayer(
+            PlayerState.Spawn(new Vector3(8.5f, spawnHeight, 8.5f)), world, settings.Bounds, new PlayerAbilities(CanFly: true, CanNoclip: true));
         _farPlane = (settings.RenderDistance + 1) * Chunk.Size * 1.5f;
     }
 
     /// <summary>
     /// Creates a game with the default wiring: heightmap terrain, culled meshing, and a threaded <see cref="ChunkPipeline"/>.
-    /// The camera starts 20 blocks above the terrain surface, or above the sea if that is higher, at X = 8, Z = 8.
+    /// The player starts standing on the terrain surface, or on the sea if that is higher, at X = 8, Z = 8.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">A value in <paramref name="settings"/> is out of range.</exception>
     public static NerdcraftGame Create(GameSettings settings)
@@ -57,11 +56,11 @@ public sealed class NerdcraftGame : IAsyncDisposable
         settings.Validate();
         HeightmapTerrainGenerator generator = new(settings.Seed, settings.Bounds);
         ChunkPipeline pipeline = new(generator, new CulledChunkMesher(), settings.WorkerCount);
-        return new NerdcraftGame(settings, pipeline, new VoxelWorld(), Math.Max(generator.SurfaceHeight(8, 8), HeightmapTerrainGenerator.SeaLevel) + SpawnClearance);
+        return new NerdcraftGame(settings, pipeline, new VoxelWorld(), Math.Max(generator.SurfaceHeight(8, 8), HeightmapTerrainGenerator.SeaLevel) + 1);
     }
 
-    /// <summary>Advances the camera by <paramref name="deltaSeconds"/> and requests any chunks it now needs. Does not touch the renderer.</summary>
-    /// <param name="input">This frame's input. Toggles the debug overlay when <see cref="InputState.ToggleDebug"/> is set.</param>
+    /// <summary>Advances the player by <paramref name="deltaSeconds"/> and requests any chunks they now need. Does not touch the renderer.</summary>
+    /// <param name="input">This frame's input. Toggles the debug overlay when <see cref="InputState.ToggleDebug"/> is set, and flight and noclip likewise.</param>
     /// <param name="deltaSeconds">Time since the previous frame, in seconds.</param>
     public void Update(InputState input, float deltaSeconds)
     {
@@ -70,8 +69,8 @@ public sealed class NerdcraftGame : IAsyncDisposable
             _showDebug = !_showDebug;
         }
 
-        _camera.Apply(input, deltaSeconds);
-        _streamer.Update(_camera.Position);
+        _player.Update(input, deltaSeconds);
+        _streamer.Update(_player.EyePosition);
     }
 
     /// <summary>Uploads finished meshes and draws one frame. Must run on the thread that owns the graphics context.</summary>
@@ -79,12 +78,12 @@ public sealed class NerdcraftGame : IAsyncDisposable
     {
         _streamer.UploadCompleted(renderer);
 
-        CameraView view = _camera.ToView(_settings.FovYDegrees, nearPlane: 0.1f, _farPlane);
+        CameraView view = _player.ToView(_settings.FovYDegrees, nearPlane: 0.1f, _farPlane);
         Frustum frustum = Frustum.FromViewProjection(view.CreateViewProjection(renderer.AspectRatio));
 
         renderer.BeginFrame(view, SkyColor);
         DrawStats stats = _streamer.Draw(renderer, frustum, view.Position);
-        renderer.EndFrame(_showDebug ? new DebugOverlay(_camera.Position, stats) : null);
+        renderer.EndFrame(_showDebug ? new DebugOverlay(_player.EyePosition, stats) : null);
     }
 
     /// <summary>Stops background workers (when the work queue is disposable) and waits for them to finish.</summary>

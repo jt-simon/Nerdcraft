@@ -4,6 +4,7 @@ using System.Numerics;
 
 using Nerdcraft.Application.Input;
 using Nerdcraft.Application.Meshing;
+using Nerdcraft.Application.Rendering;
 using Nerdcraft.Application.Tests.Support;
 using Nerdcraft.Domain.World;
 
@@ -11,6 +12,8 @@ namespace Nerdcraft.Application.Tests;
 
 public class NerdcraftGameTests
 {
+    private static readonly InputState ToggleDebug = new(Vector2.Zero, Vector2.Zero, false, false, ToggleDebug: true);
+
     // Each of these would otherwise start a game that runs but never shows any terrain.
     public static TheoryData<string> InvalidSettingNames =>
     [
@@ -44,14 +47,18 @@ public class NerdcraftGameTests
     }
 
     [Fact]
-    public void Update_ToggleDebugPressed_ShowsOverlayWithCameraPosition()
+    public void Update_ToggleDebugPressed_ShowsOverlayWithEyePosition()
     {
         (NerdcraftGame game, FakeRenderer renderer) = CreateDebugTestGame();
 
-        game.Update(new InputState(Vector3.Zero, Vector2.Zero, false, ToggleDebug: true), 0.016f);
+        game.Update(ToggleDebug, 0.016f);
         game.Render(renderer);
 
-        Assert.Equal(new Vector3(8f, 100f, 8f), renderer.DebugOverlays[^1]?.CameraPosition);
+        // Spawn is centered on block (8, 8) with the feet at 100 and the eyes 1.62 above them.
+        DebugOverlay? overlay = renderer.DebugOverlays[^1];
+        Assert.NotNull(overlay);
+        Vector3 eye = overlay.Value.CameraPosition;
+        Assert.True(Vector3.Distance(new Vector3(8.5f, 101.62f, 8.5f), eye) < 1e-3f);
     }
 
     [Fact]
@@ -59,8 +66,8 @@ public class NerdcraftGameTests
     {
         (NerdcraftGame game, FakeRenderer renderer) = CreateDebugTestGame();
 
-        game.Update(new InputState(Vector3.Zero, Vector2.Zero, false, ToggleDebug: true), 0.016f);
-        game.Update(new InputState(Vector3.Zero, Vector2.Zero, false, ToggleDebug: true), 0.016f);
+        game.Update(ToggleDebug, 0.016f);
+        game.Update(ToggleDebug, 0.016f);
         game.Render(renderer);
 
         Assert.Null(renderer.DebugOverlays[^1]);

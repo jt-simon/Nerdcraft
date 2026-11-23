@@ -10,6 +10,9 @@ contain breaking changes.
 
 ### Added
 
+- Player movement instead of a free camera: walking with gravity and block collision, jumping, sneaking (slower, lower eyes, no stepping off ledges), double-tap W sprinting, swimming in water, flight (F; still collides, ends on landing) and noclip (N). Controls are WASD, Space, Shift, F and N.
+- The movement rules are a pure, fixed-rate (20 Hz) simulation in Domain (`PlayerMovement`, `VoxelCollision`, `PlayerState`, `PlayerCommand`, `PlayerAbilities`), so a server can run the same code later.
+- `BlockTypes.IsSolid` and `BlockTypes.IsLiquid`.
 - Procedural terrain from layered simplex noise (continents, mountain ranges and hills) around sea level at Y = 0.
 - World height range of Y = -50 to Y = 200, set by `GameSettings.Bounds`.
 - Bedrock block that always fills the bottom layer of the world.
@@ -28,6 +31,8 @@ contain breaking changes.
 
 ### Changed
 
+- `InputState` now has `Move` as a `Vector2` and `Jump`, `Sneak`, `ToggleFly` and `ToggleNoclip` in place of `Sprint`; `FlyCamera` is replaced by `LocalPlayer`.
+- `NerdcraftGame`'s `spawnHeight` is now the height of the player's feet, and the player spawns standing on the terrain instead of 20 blocks above it.
 - `IRenderer.EndFrame` now takes an optional `DebugOverlay` (camera position plus `DrawStats`) and draws the debug overlay when it is set (`RaylibRenderer.ShowFps` is removed); `ChunkStreamer.Draw` returns the `DrawStats`.
 - `ChunkMesh` gains a `Visibility` member, and `IChunkMesher.Mesh` must set it.
 - `IChunkMesher.Mesh` returns a `ChunkMesh` (opaque and translucent meshes) instead of a `MeshData`, and `MeshedChunk.Mesh` has the same type.
