@@ -14,9 +14,10 @@ Nerdcraft.Desktop            composition root (the only place a renderer meets t
        -> Nerdcraft.Domain        blocks, chunks, world, terrain generation (no dependencies)
 ```
 
-- **Domain**: `VoxelWorld`, `Chunk`, `BlockId`, `WorldBounds`, `ITerrainGenerator`. Pure C#, no I/O.
+- **Domain**: `VoxelWorld`, `Chunk`, `BlockId`, `WorldBounds`, `ITerrainGenerator`, and the player movement
+  rules (`PlayerMovement`, `VoxelCollision`). Pure C#, no I/O.
 - **Application**: `NerdcraftGame` (the host calls `Update` then `Render` each frame), `IRenderer` (the
-  port every graphics backend implements), meshing, chunk streaming, camera, `InputState`.
+  port every graphics backend implements), meshing, chunk streaming, `LocalPlayer`, `InputState`.
 - **Rendering.Raylib**: implements `IRenderer`, reads raylib input into `InputState`.
 
 Math uses `System.Numerics`. The core produces plain `MeshData` (positions, normals, colors, indices) and
@@ -29,6 +30,24 @@ hidden behind solid terrain are skipped; without a camera chunk it falls back to
 submits every visible opaque mesh first with `IRenderer.DrawMesh`, then the translucent meshes from farthest to
 nearest with `IRenderer.DrawTranslucentMesh`, which blends and does not write depth. Which blocks are
 translucent is a presentation choice, so it lives in `BlockPalette`, not in the domain.
+
+## Player movement
+
+The rules live in Domain so a future server can run exactly the code a client does: `PlayerMovement.Tick` takes a
+`PlayerState` and a `PlayerCommand` and returns the next `PlayerState`. It reads no device, clock or renderer, and
+`PlayerAbilities` (fly, noclip) are checked inside it, so an authority can refuse what a client asks for.
+
+- **Fixed 20 Hz tick.** Physics steps in whole ticks (`PlayerMovement.TicksPerSecond`), never by frame time, so two
+  machines given the same commands agree. `LocalPlayer` accumulates frame time, runs up to five ticks per frame, and
+  interpolates the eye between the last two ticks. Look (yaw, pitch) is applied every frame, not per tick.
+- **`PlayerCommand` is the only thing input hands to the simulation:** move axes, held jump and sneak, one-tick
+  sprint and toggle requests, and *absolute* yaw and pitch. It is a small value type that can be serialized later.
+  Adapters only report keys; `LocalPlayer` turns them into commands (it detects the double-tap on forward that starts a sprint).
+- **Collision** (`VoxelCollision`) clips a box against solid blocks one axis at a time (Y, X, Z). Space inside the world's
+  vertical bounds whose chunk is not loaded counts as solid, so the player can't walk or fall into terrain that has not
+  streamed in; `Tick` also holds still while the chunk under the feet is missing. Solidity is a rule in `BlockTypes`.
+- Floating-point results may differ slightly between machines. That is fine for prediction, because the server's
+  state wins when the two disagree.
 
 ## Threading model (target: 60 FPS on old CPUs and integrated GPUs)
 

@@ -31,4 +31,10 @@ public static class BlockTypes
 
     /// <summary>Water that fills the terrain below sea level; the only translucent block.</summary>
     public static readonly BlockId Water = new(8);
+
+    /// <summary>True when entities cannot pass through <paramref name="block"/>: every block except air and <see cref="Water"/>.</summary>
+    public static bool IsSolid(BlockId block) => !block.IsAir && block != Water;
+
+    /// <summary>True when <paramref name="block"/> is a liquid an entity can swim in; currently only <see cref="Water"/>.</summary>
+    public static bool IsLiquid(BlockId block) => block == Water;
 }
