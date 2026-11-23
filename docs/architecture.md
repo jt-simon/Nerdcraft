@@ -37,6 +37,15 @@ its own `Color`, so no engine types leak inward.
 
 `GameSettings.RenderDistance` is the main knob for weak hardware.
 
+## Third-party code
+
+Terrain noise comes from [FastNoiseLite](https://github.com/Auburn/FastNoiseLite), vendored as a single
+`internal` file under `Nerdcraft.Domain/World/Generation/ThirdParty/` rather than added as a package: it is pure
+math, so Domain keeps no framework or package dependencies, and the pinned version means a library update can
+never silently change what a seed generates. The file records its upstream release and local edits in its header,
+its license is in `THIRD-PARTY-NOTICES.md`, and a nested `.editorconfig` exempts only that file from the repo's
+style rules. `Generate_FixedSeedRegion_MatchesRecordedHash` pins the generated terrain.
+
 ## API documentation
 
 Every public type and member under `src/` carries XML doc comments. `src/Directory.Build.props` turns on

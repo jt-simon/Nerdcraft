@@ -22,6 +22,8 @@ contain breaking changes.
 - `HeightmapTerrainGenerator` now requires a `WorldBounds` argument in its constructor.
 - The camera starts 20 blocks above the terrain surface instead of at a fixed height. `NerdcraftGame`'s constructor takes an optional `spawnHeight`.
 - Chunks with no solid blocks are no longer meshed, and terrain generation skips noise sampling for chunks above the highest possible surface.
+- Terrain noise now uses FastNoiseLite (OpenSimplex2), vendored under `Nerdcraft.Domain`. Every seed generates a different world than before.
+- Terrain now sits higher: about 30% of columns are below sea level (Y = 0), down from about two-thirds, so a future ocean covers a minority of the map.
 
 ## [0.1.0] - 2026-11-22
 

@@ -134,6 +134,34 @@ public class HeightmapTerrainGeneratorTests
         }
     }
 
+    // Pins the exact terrain of a fixed region. A failure means the world every seed generates has changed (noise
+    // library update, tuning constant, layer order). If that is intended, update ExpectedRegionHash and add a
+    // CHANGELOG entry; otherwise fix the regression. Never update it just to make the test pass.
+    [Fact]
+    public void Generate_FixedSeedRegion_MatchesRecordedHash()
+    {
+        const ulong ExpectedRegionHash = 11231634255931538871UL;
+        HeightmapTerrainGenerator generator = new(1337, WorldBounds.Default);
+        ChunkPosition[] region =
+        [
+            new(0, 0, 0), new(5, -1, -3), new(2, -3, 2), new(0, -4, 0), new(40, 2, -17), new(-9, 5, 12),
+        ];
+
+        // FNV-1a over every block id of every chunk, in order.
+        ulong hash = 14695981039346656037UL;
+        BlockId[] blocks = new BlockId[Chunk.Volume];
+        foreach (ChunkPosition chunk in region)
+        {
+            generator.Generate(chunk, blocks);
+            foreach (BlockId block in blocks)
+            {
+                hash = (hash ^ block.Value) * 1099511628211UL;
+            }
+        }
+
+        Assert.Equal(ExpectedRegionHash, hash);
+    }
+
     [Fact]
     public void Constructor_MaxYNotAboveMinY_Throws()
         => Assert.Throws<ArgumentOutOfRangeException>(() => new HeightmapTerrainGenerator(1, new WorldBounds(5, 5)));
