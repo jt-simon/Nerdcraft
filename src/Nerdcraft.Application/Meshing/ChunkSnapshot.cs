@@ -45,7 +45,7 @@ public sealed class ChunkSnapshot : IDisposable
     /// <exception cref="InvalidOperationException">The chunk at <paramref name="position"/> is not loaded.</exception>
     public static ChunkSnapshot Create(VoxelWorld world, ChunkPosition position)
     {
-        if (!world.TryGetChunk(position, out Chunk chunk))
+        if (!world.TryGetChunk(position, out ChunkView chunk))
         {
             throw new InvalidOperationException($"Chunk {position} is not loaded.");
         }
@@ -64,7 +64,9 @@ public sealed class ChunkSnapshot : IDisposable
         // Face culling reads only face neighbors, but ambient occlusion also reads the padding's edges and corners.
         foreach ((int dx, int dy, int dz) in NeighborDirections)
         {
-            world.TryGetChunk(position.Offset(dx, dy, dz), out Chunk? neighbor);
+            ReadOnlySpan<BlockId> neighbor = world.TryGetChunk(position.Offset(dx, dy, dz), out ChunkView view)
+                ? view.Blocks
+                : [];
             CopyBorder(blocks, neighbor, dx, dy, dz);
         }
 
@@ -83,7 +85,7 @@ public sealed class ChunkSnapshot : IDisposable
 
     // Fills the padded cells that belong to the neighbor at offset (dx, dy, dz): a whole face (16 x 16 cells), an
     // edge (16 cells) or a corner (1 cell). Every cell is written, so stale pooled data never leaks through.
-    private static void CopyBorder(BlockId[] blocks, Chunk? neighbor, int dx, int dy, int dz)
+    private static void CopyBorder(BlockId[] blocks, ReadOnlySpan<BlockId> neighbor, int dx, int dy, int dz)
     {
         (int x0, int x1) = AxisRange(dx);
         (int y0, int y1) = AxisRange(dy);
@@ -96,9 +98,9 @@ public sealed class ChunkSnapshot : IDisposable
                 for (int x = x0; x <= x1; x++)
                 {
                     // The padded cell sits one step outside this chunk; the same cell in the neighbor is Size blocks back.
-                    BlockId block = neighbor is null
+                    BlockId block = neighbor.IsEmpty
                         ? BlockId.Air
-                        : neighbor.Blocks[Chunk.Index(x - (dx * Chunk.Size), y - (dy * Chunk.Size), z - (dz * Chunk.Size))];
+                        : neighbor[Chunk.Index(x - (dx * Chunk.Size), y - (dy * Chunk.Size), z - (dz * Chunk.Size))];
                     blocks[Index(x, y, z)] = block;
                 }
             }

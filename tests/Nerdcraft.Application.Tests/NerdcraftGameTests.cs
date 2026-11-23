@@ -13,6 +13,7 @@ namespace Nerdcraft.Application.Tests;
 
 public class NerdcraftGameTests
 {
+    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(5);
     private static readonly InputState ToggleDebug = new(Vector2.Zero, Vector2.Zero, false, false, ToggleDebug: true);
 
     private static readonly Vector2 Screen = new(800f, 600f);
@@ -25,6 +26,8 @@ public class NerdcraftGameTests
         nameof(GameSettings.Bounds),
         nameof(GameSettings.WorkerCount),
         nameof(GameSettings.MaxUploadsPerFrame),
+        nameof(GameSettings.MaxChunkInstallsPerFrame),
+        nameof(GameSettings.MaxMeshRequestsPerFrame),
         nameof(GameSettings.FovYDegrees),
     ];
 
@@ -43,11 +46,28 @@ public class NerdcraftGameTests
     }
 
     [Fact]
-    public async Task Create_DefaultSettings_Succeeds()
+    public async Task Create_WithFactoryWiring_UploadsTerrainAndDisposes()
     {
-        await using NerdcraftGame game = NerdcraftGame.Create(new GameSettings());
+        FakeRenderer renderer = new();
+        NerdcraftGame game = NerdcraftGame.Create(new GameSettings { RenderDistance = 0, WorkerCount = 1 });
 
-        Assert.NotNull(game);
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+            cts.CancelAfter(Timeout);
+            while (renderer.Uploads.Count == 0)
+            {
+                game.Update(default, 0f);
+                game.Render(renderer);
+                await Task.Delay(5, cts.Token);
+            }
+
+            Assert.Contains(renderer.VertexCounts.Values, count => count > 0);
+        }
+        finally
+        {
+            await game.DisposeAsync().AsTask().WaitAsync(Timeout, TestContext.Current.CancellationToken);
+        }
     }
 
     [Fact]
@@ -174,6 +194,8 @@ public class NerdcraftGameTests
         nameof(GameSettings.Bounds) => new GameSettings { Bounds = new WorldBounds(10, 5) },
         nameof(GameSettings.WorkerCount) => new GameSettings { WorkerCount = 0 },
         nameof(GameSettings.MaxUploadsPerFrame) => new GameSettings { MaxUploadsPerFrame = 0 },
+        nameof(GameSettings.MaxChunkInstallsPerFrame) => new GameSettings { MaxChunkInstallsPerFrame = 0 },
+        nameof(GameSettings.MaxMeshRequestsPerFrame) => new GameSettings { MaxMeshRequestsPerFrame = 0 },
         nameof(GameSettings.FovYDegrees) => new GameSettings { FovYDegrees = 180f },
         _ => throw new ArgumentOutOfRangeException(nameof(settingName)),
     };

@@ -13,6 +13,74 @@ namespace Nerdcraft.Domain.Tests.Physics;
 public class VoxelCollisionTests
 {
     [Fact]
+    public void Collides_OverlapsStoneAtLargeX_FindsSolidBlock()
+    {
+        BlockPosition block = new(500000, 1, 0);
+        VoxelWorld world = TestTerrain.Empty(block.ChunkPosition);
+        world.SetBlock(block, BlockTypes.Stone);
+        Aabb box = PlayerState.Spawn(new Vector3(500000.5f, 1f, 1f)).Bounds;
+
+        Assert.True(VoxelCollision.Collides(world, TestTerrain.Bounds, box));
+    }
+
+    [Fact]
+    public void OverlapsLiquid_OverlapsWaterAtLargeX_FindsLiquidBlock()
+    {
+        BlockPosition block = new(500000, 1, 0);
+        VoxelWorld world = TestTerrain.Empty(block.ChunkPosition);
+        world.SetBlock(block, BlockTypes.Water);
+        Aabb box = PlayerState.Spawn(new Vector3(500000.5f, 1f, 1f)).Bounds;
+
+        Assert.True(VoxelCollision.OverlapsLiquid(world, box));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void OverlapsLiquid_AtLargeX_RequiresPositiveOverlap(bool overlaps)
+    {
+        BlockPosition block = new(500000, 1, 0);
+        VoxelWorld world = TestTerrain.Empty(block.ChunkPosition);
+        world.SetBlock(block, BlockTypes.Water);
+        float edge = overlaps ? MathF.BitIncrement(500000f) : 500000f;
+        Aabb box = new(new Vector3(499999.5f, 1f, 0.25f), new Vector3(edge, 1.75f, 0.75f));
+
+        Assert.Equal(overlaps, VoxelCollision.OverlapsLiquid(world, box));
+    }
+
+    [Fact]
+    public void Move_AgainstWallWithNarrowOverlapAtLargeX_StopsOnFace()
+    {
+        BlockPosition block = new(500000, 1, 2);
+        VoxelWorld world = TestTerrain.Empty(block.ChunkPosition, block.ChunkPosition.Offset(-1, 0, 0));
+        world.SetBlock(block, BlockTypes.Stone);
+        Aabb box = PlayerState.Spawn(new Vector3(499999.9f, 1f, 1.5f)).Bounds;
+
+        Vector3 allowed = VoxelCollision.Move(world, TestTerrain.Bounds, box, new Vector3(0f, 0f, 1f));
+
+        Assert.Equal(0.2f, allowed.Z, 3);
+    }
+
+    [Theory]
+    [InlineData(499998.37f, 1f, 2.5f, 1f, 0f, 0f)]
+    [InlineData(500001.63f, 1f, 2.5f, -1f, 0f, 0f)]
+    [InlineData(500000.5f, 1f, 0.37f, 0f, 0f, 1f)]
+    [InlineData(500000.5f, -0.93f, 2.5f, 0f, 1f, 0f)]
+    public void Collides_BoxStoppedByMoveAtLargeX_ReportsNoCollision(float x, float y, float z, float dx, float dy, float dz)
+    {
+        BlockPosition block = new(500000, 1, 2);
+        VoxelWorld world = TestTerrain.Empty(block.ChunkPosition, block.ChunkPosition.Offset(-1, 0, 0));
+        world.SetBlock(block, BlockTypes.Stone);
+        Aabb box = PlayerState.Spawn(new Vector3(x, y, z)).Bounds;
+
+        Vector3 wanted = new Vector3(dx, dy, dz) * 5f;
+        Vector3 allowed = VoxelCollision.Move(world, TestTerrain.Bounds, box, wanted);
+
+        Assert.True(allowed.Length() < wanted.Length());
+        Assert.False(VoxelCollision.Collides(world, TestTerrain.Bounds, box.Offset(allowed)));
+    }
+
+    [Fact]
     public void Move_FallOntoFloor_StopsOnTopFace()
     {
         VoxelWorld world = TestTerrain.Flat();

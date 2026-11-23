@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using System.Numerics;
 
 using Nerdcraft.Application.Input;
@@ -21,6 +23,11 @@ namespace Nerdcraft.Application;
 /// </summary>
 public sealed class NerdcraftGame : IAsyncDisposable
 {
+    private static readonly Histogram<double> FrameTime = StreamingMetrics.Meter.CreateHistogram<double>("nerdcraft.frame.duration", "ms");
+    private static readonly Histogram<double> UpdateTime = StreamingMetrics.Meter.CreateHistogram<double>("nerdcraft.update.duration", "ms");
+    private static readonly Histogram<double> UploadTime = StreamingMetrics.Meter.CreateHistogram<double>("nerdcraft.upload.duration", "ms");
+    private static readonly Histogram<double> DrawTime = StreamingMetrics.Meter.CreateHistogram<double>("nerdcraft.draw.duration", "ms");
+
     private static readonly Color SkyColor = new(135, 190, 235);
 
     private readonly GameSettings _settings;
@@ -32,6 +39,7 @@ public sealed class NerdcraftGame : IAsyncDisposable
     private int _ignoreLookFrames;
     private Vector2 _screenSize;
     private Vector2 _pointer;
+    private long _previousFrame;
 
     /// <summary>Creates a game over the supplied work queue and world. If <paramref name="workQueue"/> is <see cref="IAsyncDisposable"/>, this game disposes it.</summary>
     /// <param name="settings">Configuration for streaming and the camera.</param>
@@ -59,7 +67,7 @@ public sealed class NerdcraftGame : IAsyncDisposable
     {
         settings.Validate();
         HeightmapTerrainGenerator generator = new(settings.Seed, settings.Bounds);
-        ChunkPipeline pipeline = new(generator, new CulledChunkMesher(), settings.WorkerCount);
+        ChunkPipeline pipeline = new(generator, new CulledChunkMesher(), settings.WorkerCount, settings.Bounds);
         return new NerdcraftGame(settings, pipeline, new VoxelWorld(), Math.Max(generator.SurfaceHeight(8, 8), HeightmapTerrainGenerator.SeaLevel) + 1);
     }
 
@@ -79,6 +87,22 @@ public sealed class NerdcraftGame : IAsyncDisposable
     /// <param name="deltaSeconds">Time since the previous frame, in seconds.</param>
     public void Update(InputState input, float deltaSeconds)
     {
+        long started = StreamingMetrics.Start(UpdateTime);
+        if (FrameTime.Enabled)
+        {
+            long now = Stopwatch.GetTimestamp();
+            if (_previousFrame != 0)
+            {
+                FrameTime.Record(Stopwatch.GetElapsedTime(_previousFrame, now).TotalMilliseconds);
+            }
+
+            _previousFrame = now;
+        }
+        else
+        {
+            _previousFrame = 0;
+        }
+
         if (input.ToggleDebug)
         {
             _showDebug = !_showDebug;
@@ -116,21 +140,27 @@ public sealed class NerdcraftGame : IAsyncDisposable
         }
 
         _streamer.Update(_player.EyePosition);
+        StreamingMetrics.RecordElapsed(UpdateTime, started);
     }
 
     /// <summary>Uploads finished meshes and draws one frame. Must run on the thread that owns the graphics context.</summary>
     public void Render(IRenderer renderer)
     {
+        long uploadStarted = StreamingMetrics.Start(UploadTime);
         _streamer.UploadCompleted(renderer);
+        StreamingMetrics.RecordElapsed(UploadTime, uploadStarted);
+
+        long drawStarted = StreamingMetrics.Start(DrawTime);
 
         CameraView view = _player.ToView(_settings.FovYDegrees, nearPlane: 0.1f, _farPlane);
         Frustum frustum = Frustum.FromViewProjection(view.CreateViewProjection(renderer.AspectRatio));
 
         renderer.BeginFrame(view, SkyColor);
-        DrawStats stats = _streamer.Draw(renderer, frustum, view.Position);
+        DrawStats stats = _streamer.Draw(renderer, frustum, view.Position, countMeshedChunks: _showDebug);
         renderer.EndFrame(
             _showDebug ? new DebugOverlay(_player.EyePosition, stats) : null,
             IsPaused ? PauseMenu.Layout(_screenSize, _pointer) : null);
+        StreamingMetrics.RecordElapsed(DrawTime, drawStarted);
     }
 
     private void SetPaused(bool paused)
@@ -143,6 +173,13 @@ public sealed class NerdcraftGame : IAsyncDisposable
         }
     }
 
-    /// <summary>Stops background workers (when the work queue is disposable) and waits for them to finish.</summary>
-    public ValueTask DisposeAsync() => _workQueue?.DisposeAsync() ?? ValueTask.CompletedTask;
+    /// <summary>
+    /// Discards any staged CPU mesh, stops background workers and waits for them to finish. Call when frames have
+    /// stopped. The renderer's owner is responsible for releasing its remaining GPU resources.
+    /// </summary>
+    public ValueTask DisposeAsync()
+    {
+        _streamer.DiscardStagedMesh();
+        return _workQueue?.DisposeAsync() ?? ValueTask.CompletedTask;
+    }
 }

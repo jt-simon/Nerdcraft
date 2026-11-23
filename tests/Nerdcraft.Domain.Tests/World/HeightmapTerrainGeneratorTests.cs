@@ -146,7 +146,7 @@ public class HeightmapTerrainGeneratorTests
     public void Generate_SurfaceAcrossRegion_UsesEveryHeightMaterial()
     {
         HeightmapTerrainGenerator generator = new(1337, WorldBounds.Default);
-        Dictionary<ChunkPosition, BlockId[]> cache = [];
+        BlockId[] blocks = new BlockId[Chunk.Volume];
         HashSet<BlockId> tops = [];
         int highestSand = int.MinValue;
         int lowestSnow = int.MaxValue;
@@ -156,7 +156,9 @@ public class HeightmapTerrainGeneratorTests
             for (int x = -1500; x <= 1500; x += 19)
             {
                 int surface = generator.SurfaceHeight(x, z);
-                BlockId top = BlockAt(generator, cache, new BlockPosition(x, surface, z));
+                BlockPosition position = new(x, surface, z);
+                generator.Generate(position.ChunkPosition, blocks);
+                BlockId top = blocks[Chunk.Index(position.LocalX, position.LocalY, position.LocalZ)];
                 tops.Add(top);
                 if (top == BlockTypes.Sand)
                 {

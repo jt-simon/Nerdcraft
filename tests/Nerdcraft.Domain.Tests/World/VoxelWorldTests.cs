@@ -27,8 +27,72 @@ public class VoxelWorldTests
 
         world.LoadChunk(new ChunkPosition(0, 0, 0), blocks);
 
-        Assert.True(world.TryGetChunk(new ChunkPosition(0, 0, 0), out Chunk chunk));
+        Assert.True(world.TryGetChunk(new ChunkPosition(0, 0, 0), out ChunkView chunk));
         Assert.False(chunk.IsEmpty);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(Chunk.Volume - 1)]
+    [InlineData(Chunk.Volume + 1)]
+    public void LoadChunk_InvalidLengthForNewChunk_LeavesWorldUnchanged(int length)
+    {
+        ChunkPosition target = new(0, 0, 0);
+        ChunkPosition adjacent = new(1, 0, 0);
+        VoxelWorld world = WorldWith(adjacent);
+        Assert.True(world.TryGetChunk(adjacent, out ChunkView neighbor));
+        int neighborVersion = neighbor.Version;
+        int revision = world.Revision;
+
+        Assert.Throws<ArgumentException>("blocks", () => world.LoadChunk(target, new BlockId[length]));
+
+        Assert.False(world.IsLoaded(target));
+        Assert.Equal(revision, world.Revision);
+        Assert.Equal(neighborVersion, neighbor.Version);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(Chunk.Volume - 1)]
+    [InlineData(Chunk.Volume + 1)]
+    public void LoadChunk_InvalidLengthForExistingChunk_PreservesOriginal(int length)
+    {
+        ChunkPosition target = new(0, 0, 0);
+        ChunkPosition adjacent = new(1, 0, 0);
+        VoxelWorld world = WorldWith(target, adjacent);
+        world.SetBlock(new BlockPosition(1, 1, 1), BlockTypes.Stone);
+        Assert.True(world.TryGetChunk(target, out ChunkView chunk));
+        Assert.True(world.TryGetChunk(adjacent, out ChunkView neighbor));
+        int version = chunk.Version;
+        int neighborVersion = neighbor.Version;
+        int revision = world.Revision;
+        BlockId[] original = chunk.Blocks.ToArray();
+
+        Assert.Throws<ArgumentException>("blocks", () => world.LoadChunk(target, new BlockId[length]));
+
+        Assert.True(world.IsLoaded(target));
+        Assert.Equal(revision, world.Revision);
+        Assert.Equal(version, chunk.Version);
+        Assert.Equal(neighborVersion, neighbor.Version);
+        Assert.Equal(original, chunk.Blocks.ToArray());
+        Assert.False(chunk.IsEmpty);
+    }
+
+    [Theory]
+    [InlineData(1, 0, 0)]
+    [InlineData(1, 1, 0)]
+    [InlineData(1, 1, 1)]
+    public void UnloadChunk_TouchesEveryKindOfNeighbor(int x, int y, int z)
+    {
+        ChunkPosition removed = new(0, 0, 0);
+        ChunkPosition adjacent = new(x, y, z);
+        VoxelWorld world = WorldWith(removed, adjacent);
+        Assert.True(world.TryGetChunk(adjacent, out ChunkView neighbor));
+        int before = neighbor.Version;
+
+        Assert.True(world.UnloadChunk(removed));
+
+        Assert.Equal(before + 1, neighbor.Version);
     }
 
     [Fact]
@@ -64,7 +128,7 @@ public class VoxelWorldTests
     public void SetBlock_OnChunkBorder_BumpsNeighborVersion()
     {
         VoxelWorld world = WorldWith(new ChunkPosition(0, 0, 0), new ChunkPosition(1, 0, 0));
-        world.TryGetChunk(new ChunkPosition(1, 0, 0), out Chunk neighbor);
+        world.TryGetChunk(new ChunkPosition(1, 0, 0), out ChunkView neighbor);
         int before = neighbor.Version;
 
         world.SetBlock(new BlockPosition(15, 0, 0), BlockTypes.Stone); // +X border of chunk (0,0,0)
@@ -78,8 +142,8 @@ public class VoxelWorldTests
         ChunkPosition edgeNeighbor = new(1, 1, 0);
         ChunkPosition cornerNeighbor = new(1, 1, 1);
         VoxelWorld world = WorldWith(new ChunkPosition(0, 0, 0), edgeNeighbor, cornerNeighbor);
-        world.TryGetChunk(edgeNeighbor, out Chunk edge);
-        world.TryGetChunk(cornerNeighbor, out Chunk corner);
+        world.TryGetChunk(edgeNeighbor, out ChunkView edge);
+        world.TryGetChunk(cornerNeighbor, out ChunkView corner);
         int edgeBefore = edge.Version;
         int cornerBefore = corner.Version;
 
@@ -93,7 +157,7 @@ public class VoxelWorldTests
     public void SetBlock_InChunkInterior_LeavesNeighborVersionUnchanged()
     {
         VoxelWorld world = WorldWith(new ChunkPosition(0, 0, 0), new ChunkPosition(1, 0, 0));
-        world.TryGetChunk(new ChunkPosition(1, 0, 0), out Chunk neighbor);
+        world.TryGetChunk(new ChunkPosition(1, 0, 0), out ChunkView neighbor);
         int before = neighbor.Version;
 
         world.SetBlock(new BlockPosition(7, 7, 7), BlockTypes.Stone);
@@ -107,12 +171,12 @@ public class VoxelWorldTests
         ChunkPosition position = new(0, 0, 0);
         VoxelWorld world = WorldWith(position);
         world.SetBlock(new BlockPosition(1, 1, 1), BlockTypes.Stone);
-        world.TryGetChunk(position, out Chunk first);
+        world.TryGetChunk(position, out ChunkView first);
         int earlierVersion = first.Version;
 
         world.UnloadChunk(position);
         world.LoadChunk(position, new BlockId[Chunk.Volume]);
-        world.TryGetChunk(position, out Chunk second);
+        world.TryGetChunk(position, out ChunkView second);
 
         Assert.True(second.Version > earlierVersion);
     }
@@ -122,7 +186,7 @@ public class VoxelWorldTests
     {
         VoxelWorld world = new();
         world.LoadChunk(new ChunkPosition(0, 0, 0), new BlockId[Chunk.Volume]);
-        world.TryGetChunk(new ChunkPosition(0, 0, 0), out Chunk first);
+        world.TryGetChunk(new ChunkPosition(0, 0, 0), out ChunkView first);
         int before = first.Version;
 
         world.LoadChunk(new ChunkPosition(0, 0, 1), new BlockId[Chunk.Volume]);

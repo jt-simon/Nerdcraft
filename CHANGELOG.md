@@ -32,10 +32,20 @@ contain breaking changes.
 - `VoxelWorld.Revision`, a counter that increases whenever a chunk is loaded or unloaded or a block changes.
 - `GameSettings.MaxChunkInstallsPerFrame` (default 64) and `MaxMeshRequestsPerFrame` (default 16), which spread the main-thread work of a burst of finished chunks over several frames instead of stalling one.
 
+### Fixed
+
+- Malformed chunk loads leave the world untouched, and unloading a chunk invalidates its neighbors' geometry and ambient occlusion.
+- Collision and liquid queries keep working far from spawn, and long camera jumps release chunks that are out of range.
+- Stopping the chunk pipeline returns pooled buffers from abandoned work.
+
 ### Changed
 
 - Esc no longer quits the game directly; use the pause menu's Quit.
 - `IRenderer.EndFrame` now takes a `PauseMenuView?` to draw the pause menu.
+- `ChunkPipeline`'s constructor takes the `WorldBounds`, which size its outstanding-generation limit.
+- World-owned chunks are exposed as read-only views. Block edits go through `VoxelWorld.SetBlock` so streaming sees every change.
+- Streaming bounds outstanding results and budgets individual mesh uploads, including water. Mixed chunks appear after both uploads are ready, and stale results and mesh releases are spread across frames.
+- Meshing allocates material buffers on demand, the debug mesh count is computed only when displayed, and Raylib batches depth-write changes across the water pass.
 - `InputState` now has `Move` as a `Vector2` and `Jump`, `Sneak`, `ToggleFly` and `ToggleNoclip` in place of `Sprint`; `FlyCamera` is replaced by `LocalPlayer`.
 - `NerdcraftGame`'s `spawnHeight` is now the height of the player's feet, and the player spawns standing on the terrain instead of 20 blocks above it.
 - `IRenderer.EndFrame` now takes an optional `DebugOverlay` (camera position plus `DrawStats`) and draws the debug overlay when it is set (`RaylibRenderer.ShowFps` is removed); `ChunkStreamer.Draw` returns the `DrawStats`.

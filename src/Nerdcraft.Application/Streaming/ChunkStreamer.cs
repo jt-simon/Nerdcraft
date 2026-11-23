@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 using System.Buffers;
+using System.Diagnostics.Metrics;
 using System.Numerics;
 
 using Nerdcraft.Application.Meshing;
@@ -24,8 +25,15 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
     // Chunk neighbor offsets in ChunkFace order; face ^ 1 is the opposite direction.
     private static readonly (int Dx, int Dy, int Dz)[] FaceDirections = [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)];
 
+    private static readonly Histogram<long> DrawCalls = StreamingMetrics.Meter.CreateHistogram<long>("nerdcraft.draw.calls", "{call}");
+    private static readonly Histogram<int> UploadCalls = StreamingMetrics.Meter.CreateHistogram<int>("nerdcraft.mesh.upload.calls", "{call}");
+    private static readonly Histogram<int> ReleaseCalls = StreamingMetrics.Meter.CreateHistogram<int>("nerdcraft.mesh.release.calls", "{call}");
+    private static readonly Histogram<double> ReleaseTime = StreamingMetrics.Meter.CreateHistogram<double>("nerdcraft.mesh.release.duration", "ms");
+
     private readonly Dictionary<ChunkPosition, Entry> _entries = [];
-    private readonly List<MeshHandle> _pendingRelease = [];
+    private readonly Queue<MeshHandle> _pendingRelease = new();
+    private MeshedChunk? _stagedMesh;
+    private MeshHandle? _stagedOpaque;
     private readonly List<TranslucentDraw> _translucentScratch = [];
     private readonly List<(ChunkPosition Position, Entry Entry)> _visibleScratch = [];
     private readonly Queue<WalkStep> _walkQueue = new();
@@ -66,71 +74,109 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
         }
     }
 
-    /// <summary>Releases meshes that were replaced or unloaded, then uploads up to <see cref="GameSettings.MaxUploadsPerFrame"/> finished meshes. Meshes built from outdated chunk contents are discarded.</summary>
+    /// <summary>
+    /// Uploads up to <see cref="GameSettings.MaxUploadsPerFrame"/> individual meshes. Takes at most
+    /// <see cref="GameSettings.MaxMeshRequestsPerFrame"/> + <see cref="GameSettings.MaxUploadsPerFrame"/> finished results,
+    /// counting discarded stale ones, and releases at most twice <see cref="GameSettings.MaxUploadsPerFrame"/> old meshes. A chunk's opaque and translucent handles become visible together once both
+    /// are ready. Meshes built from outdated chunk contents are discarded.
+    /// </summary>
     public void UploadCompleted(IRenderer renderer)
     {
-        foreach (MeshHandle handle in _pendingRelease)
-        {
-            renderer.ReleaseMesh(handle);
-        }
-
-        _pendingRelease.Clear();
-
         int uploads = 0;
-        while (uploads < settings.MaxUploadsPerFrame && queue.TryTakeMeshed(out MeshedChunk result))
+        // Bounds results examined per frame, stale ones included. No more than one frame's requests plus one frame's
+        // uploads can be useful, so this drains the queue at the rate it fills without a dedicated setting.
+        long remainingResults = (long)settings.MaxMeshRequestsPerFrame + settings.MaxUploadsPerFrame;
+        while (uploads < settings.MaxUploadsPerFrame && remainingResults-- > 0)
         {
-            using ChunkMesh mesh = result.Mesh;
-            if (!_entries.TryGetValue(result.Position, out Entry? entry)
-                || !world.TryGetChunk(result.Position, out Chunk chunk))
+            if (_stagedMesh is null)
             {
+                if (!queue.TryTakeMeshed(out MeshedChunk next))
+                {
+                    break;
+                }
+
+                _stagedMesh = next;
+            }
+
+            MeshedChunk result = _stagedMesh.Value;
+            if (!_entries.TryGetValue(result.Position, out Entry? entry)
+                || entry.MeshRequestedVersion != result.Version)
+            {
+                DiscardStagedMesh();
                 continue;
             }
 
-            if (entry.MeshRequestedVersion != result.Version)
+            if (!world.TryGetChunk(result.Position, out ChunkView chunk) || chunk.Version != result.Version)
             {
-                continue; // Built for an earlier load of this chunk; not the mesh we are waiting for.
+                FinishRequest(entry);
+                DiscardStagedMesh();
+                continue;
             }
 
-            entry.MeshRequestedVersion = null;
-            _rescan = true; // An edit made while this mesh was in flight was skipped by the scan; scan again to request the new mesh.
-            if (chunk.Version != result.Version)
+            ChunkMesh mesh = result.Mesh;
+            if (_stagedOpaque is null && mesh.Opaque.VertexCount > 0)
             {
-                continue; // Blocks changed while meshing; the next scan requests a fresh mesh.
+                _stagedOpaque = renderer.UploadMesh(mesh.Opaque);
+                uploads++;
+                mesh.Opaque.Dispose();
             }
 
-            if (entry.Handle is { } old)
-            {
-                renderer.ReleaseMesh(old);
-                entry.Handle = null;
-                entry.VertexCount = 0;
-            }
-
-            if (entry.TranslucentHandle is { } oldTranslucent)
-            {
-                renderer.ReleaseMesh(oldTranslucent);
-                entry.TranslucentHandle = null;
-                entry.TranslucentVertexCount = 0;
-            }
-
-            entry.MeshedVersion = result.Version;
-            entry.Visibility = mesh.Visibility; // Even for a chunk with no faces: solid rock still hides what is behind it.
-            if (mesh.Opaque.VertexCount > 0)
-            {
-                entry.Handle = renderer.UploadMesh(mesh.Opaque);
-                entry.VertexCount = mesh.Opaque.VertexCount;
-            }
-
+            MeshHandle? translucent = null;
             if (mesh.Translucent.VertexCount > 0)
             {
-                entry.TranslucentHandle = renderer.UploadMesh(mesh.Translucent);
-                entry.TranslucentVertexCount = mesh.Translucent.VertexCount;
-            }
+                if (uploads == settings.MaxUploadsPerFrame)
+                {
+                    break; // Keep the current handles visible until both replacements are ready.
+                }
 
-            if (entry.Handle is not null || entry.TranslucentHandle is not null)
-            {
+                translucent = renderer.UploadMesh(mesh.Translucent);
                 uploads++;
             }
+
+            ReleaseLater(entry);
+            entry.Handle = _stagedOpaque;
+            entry.TranslucentHandle = translucent;
+            entry.VertexCount = mesh.Opaque.VertexCount;
+            entry.TranslucentVertexCount = mesh.Translucent.VertexCount;
+            entry.MeshedVersion = result.Version;
+            entry.Visibility = mesh.Visibility;
+            FinishRequest(entry);
+            _stagedOpaque = null;
+            DiscardStagedMesh();
         }
+
+        UploadCalls.Record(uploads);
+        long releaseStarted = StreamingMetrics.Start(ReleaseTime);
+        int releases = 0;
+        long releaseLimit = 2L * settings.MaxUploadsPerFrame; // One completed replacement can retire both old materials.
+        while (releases < releaseLimit && _pendingRelease.TryPeek(out MeshHandle handle))
+        {
+            renderer.ReleaseMesh(handle);
+            _pendingRelease.Dequeue();
+            releases++;
+        }
+
+        StreamingMetrics.RecordElapsed(ReleaseTime, releaseStarted);
+        ReleaseCalls.Record(releases);
+    }
+
+    // The renderer owns native handles through its own disposal. The streamer owns this in-flight CPU result.
+    internal void DiscardStagedMesh()
+    {
+        if (_stagedOpaque is { } handle)
+        {
+            _pendingRelease.Enqueue(handle);
+            _stagedOpaque = null;
+        }
+
+        _stagedMesh?.Mesh.Dispose();
+        _stagedMesh = null;
+    }
+
+    private void FinishRequest(Entry entry)
+    {
+        entry.MeshRequestedVersion = null;
+        _rescan = true; // The previous scan may have skipped a change while this request was outstanding.
     }
 
     /// <summary>
@@ -143,17 +189,21 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
     /// <param name="renderer">Receives the draw calls.</param>
     /// <param name="frustum">The view volume; chunks outside it are skipped.</param>
     /// <param name="cameraPosition">Camera position in world space; starts the visibility walk and orders the translucent meshes.</param>
-    /// <returns>How many chunks and vertices were drawn, and how many chunks hold a mesh.</returns>
-    public DrawStats Draw(IRenderer renderer, Frustum frustum, Vector3 cameraPosition)
+    /// <param name="countMeshedChunks">Whether to count all chunks with a mesh, including those outside the view.</param>
+    /// <returns>How many chunks and vertices were drawn, and the total meshed chunk count when requested (zero otherwise).</returns>
+    public DrawStats Draw(IRenderer renderer, Frustum frustum, Vector3 cameraPosition, bool countMeshedChunks = true)
     {
         _translucentScratch.Clear();
         _visibleScratch.Clear();
         int meshed = 0;
-        foreach (Entry entry in _entries.Values)
+        if (countMeshedChunks)
         {
-            if (entry.HasMesh)
+            foreach (Entry entry in _entries.Values)
             {
-                meshed++;
+                if (entry.HasMesh)
+                {
+                    meshed++;
+                }
             }
         }
 
@@ -168,6 +218,7 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
         }
 
         long vertices = 0;
+        long opaqueDraws = 0;
         foreach ((ChunkPosition position, Entry entry) in _visibleScratch)
         {
             Vector3 min = ChunkMin(position);
@@ -176,6 +227,7 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
             if (entry.Handle is { } handle)
             {
                 renderer.DrawMesh(handle, Matrix4x4.CreateTranslation(min));
+                opaqueDraws++;
             }
 
             if (entry.TranslucentHandle is { } translucent)
@@ -191,6 +243,7 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
             renderer.DrawTranslucentMesh(draw.Handle, Matrix4x4.CreateTranslation(draw.Min));
         }
 
+        DrawCalls.Record(opaqueDraws + _translucentScratch.Count);
         return new DrawStats(_visibleScratch.Count, meshed, vertices);
     }
 
@@ -226,7 +279,7 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
             for (int exit = 0; exit < FaceDirections.Length; exit++)
             {
                 if (exit == step.EnteredFace
-                    || (step.EnteredFace >= 0 && !step.Entry.Visibility.Connects((ChunkFace)step.EnteredFace, (ChunkFace)exit)))
+                    || (step.EnteredFace >= 0 && !step.Entry.DrawVisibility.Connects((ChunkFace)step.EnteredFace, (ChunkFace)exit)))
                 {
                     continue;
                 }
@@ -257,6 +310,12 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
         {
             entry.VisitFrame = _drawFrame;
             entry.VisitedFaces = 0;
+            // Keep drawing retained meshes while dirty, but do not let stale connectivity hide other chunks.
+            entry.DrawVisibility = entry.Visibility != ChunkVisibility.All
+                && world.TryGetChunk(position, out ChunkView chunk)
+                && entry.MeshedVersion == chunk.Version
+                ? entry.Visibility
+                : ChunkVisibility.All;
             if (inView && entry.HasMesh)
             {
                 _visibleScratch.Add((position, entry));
@@ -274,10 +333,10 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
     private void UnloadDistantChunks(int cameraX, int cameraZ)
     {
         // Unload farther out than we load, so a camera hovering at a boundary doesn't thrash.
-        int unloadRadius = settings.RenderDistance + 1;
+        long unloadRadius = (long)settings.RenderDistance + 1;
         foreach (ChunkPosition position in _entries.Keys)
         {
-            if (DistanceSquared(position.X - cameraX, position.Z - cameraZ) > unloadRadius * unloadRadius)
+            if (DistanceSquared((long)position.X - cameraX, (long)position.Z - cameraZ) > unloadRadius * unloadRadius)
             {
                 _unloadScratch.Add(position);
             }
@@ -298,18 +357,20 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
 
     private void InstallGeneratedChunks()
     {
-        // Results beyond the budget stay queued for the next frame; stale ones are cheap and do not count.
-        int installed = 0;
-        while (installed < settings.MaxChunkInstallsPerFrame && queue.TryTakeGenerated(out GeneratedChunk result))
+        for (int processed = 0; processed < settings.MaxChunkInstallsPerFrame && queue.TryTakeGenerated(out GeneratedChunk result); processed++)
         {
-            if (_entries.TryGetValue(result.Position, out Entry? entry) && !entry.Loaded)
+            try
             {
-                world.LoadChunk(result.Position, result.Blocks.AsSpan(0, Chunk.Volume));
-                entry.Loaded = true;
-                installed++;
+                if (_entries.TryGetValue(result.Position, out Entry? entry) && !entry.Loaded)
+                {
+                    world.LoadChunk(result.Position, result.Blocks.AsSpan(0, Chunk.Volume));
+                    entry.Loaded = true;
+                }
             }
-
-            ArrayPool<BlockId>.Shared.Return(result.Blocks);
+            finally
+            {
+                ArrayPool<BlockId>.Shared.Return(result.Blocks);
+            }
         }
     }
 
@@ -369,7 +430,7 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
     // emptied after a mesh was uploaded, that mesh is stale and is released.
     private bool SkipIfEmpty(ChunkPosition position, Entry entry)
     {
-        if (!world.TryGetChunk(position, out Chunk chunk) || !chunk.IsEmpty)
+        if (!world.TryGetChunk(position, out ChunkView chunk) || !chunk.IsEmpty)
         {
             return false;
         }
@@ -389,21 +450,21 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
     {
         if (entry.Handle is { } handle)
         {
-            _pendingRelease.Add(handle);
+            _pendingRelease.Enqueue(handle);
             entry.Handle = null;
             entry.VertexCount = 0;
         }
 
         if (entry.TranslucentHandle is { } translucent)
         {
-            _pendingRelease.Add(translucent);
+            _pendingRelease.Enqueue(translucent);
             entry.TranslucentHandle = null;
             entry.TranslucentVertexCount = 0;
         }
     }
 
     private bool NeedsMesh(ChunkPosition position, Entry entry)
-        => world.TryGetChunk(position, out Chunk chunk) && chunk.Version != entry.MeshedVersion;
+        => world.TryGetChunk(position, out ChunkView chunk) && chunk.Version != entry.MeshedVersion;
 
     // Meshing before in-range neighbors exist would draw faces that get hidden a moment later, then mesh twice.
     private bool NeighborsSettled(ChunkPosition position, int cameraX, int cameraZ)
@@ -419,8 +480,8 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
                     bool wanted = (dx | dy | dz) != 0
                         && neighbor.Y >= settings.Bounds.MinChunkY
                         && neighbor.Y <= settings.Bounds.MaxChunkY
-                        && DistanceSquared(neighbor.X - cameraX, neighbor.Z - cameraZ)
-                            <= settings.RenderDistance * settings.RenderDistance;
+                        && DistanceSquared((long)neighbor.X - cameraX, (long)neighbor.Z - cameraZ)
+                            <= (long)settings.RenderDistance * settings.RenderDistance;
 
                     if (wanted && !(_entries.TryGetValue(neighbor, out Entry? other) && other.Loaded))
                     {
@@ -454,7 +515,7 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
         {
             for (int dx = -radius; dx <= radius; dx++)
             {
-                if (DistanceSquared(dx, dz) <= radius * radius)
+                if (DistanceSquared(dx, dz) <= (long)radius * radius)
                 {
                     offsets.Add((dx, dz));
                 }
@@ -465,7 +526,7 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
         return [.. offsets];
     }
 
-    private static int DistanceSquared(int dx, int dz) => (dx * dx) + (dz * dz);
+    private static long DistanceSquared(long dx, long dz) => (dx * dx) + (dz * dz);
 
     private static int FloorToChunk(float worldCoordinate) => (int)MathF.Floor(worldCoordinate) >> Chunk.SizeShift;
 
@@ -491,6 +552,8 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
         public ChunkVisibility Visibility { get; set; } = ChunkVisibility.All;
 
         // Bookkeeping for the visibility walk in Draw: the frame it last reached this chunk and the faces it entered through.
+        public ChunkVisibility DrawVisibility { get; set; }
+
         public int VisitFrame { get; set; }
 
         public int VisitedFaces { get; set; }

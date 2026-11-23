@@ -41,50 +41,60 @@ public sealed class CulledChunkMesher : IChunkMesher
     public ChunkMesh Mesh(ChunkSnapshot snapshot)
     {
         ReadOnlySpan<BlockId> blocks = snapshot.Blocks;
-        using MeshBuilder opaque = new();
-        using MeshBuilder translucent = new();
+        MeshBuilder? opaque = null;
+        MeshBuilder? translucent = null;
         Span<int> ao = stackalloc int[4];
         ChunkVisibility visibility = ChunkVisibility.Compute(snapshot);
 
-        for (int y = 0; y < Chunk.Size; y++)
+        try
         {
-            for (int z = 0; z < Chunk.Size; z++)
+            for (int y = 0; y < Chunk.Size; y++)
             {
-                for (int x = 0; x < Chunk.Size; x++)
+                for (int z = 0; z < Chunk.Size; z++)
                 {
-                    int index = ChunkSnapshot.Index(x, y, z);
-                    BlockId block = blocks[index];
-                    if (block.IsAir)
+                    for (int x = 0; x < Chunk.Size; x++)
                     {
-                        continue;
-                    }
-
-                    Color color = BlockPalette.GetColor(block);
-                    bool isTranslucent = BlockPalette.IsTranslucent(block);
-                    MeshBuilder builder = isTranslucent ? translucent : opaque;
-                    foreach (Face face in Faces)
-                    {
-                        BlockId neighbor = blocks[index + face.NeighborOffset];
-                        if (!neighbor.IsAir && (isTranslucent || !BlockPalette.IsTranslucent(neighbor)))
+                        int index = ChunkSnapshot.Index(x, y, z);
+                        BlockId block = blocks[index];
+                        if (block.IsAir)
                         {
                             continue;
                         }
 
-                        for (int corner = 0; corner < 4; corner++)
+                        Color color = BlockPalette.GetColor(block);
+                        bool isTranslucent = BlockPalette.IsTranslucent(block);
+                        foreach (Face face in Faces)
                         {
-                            ao[corner] = OcclusionLevel(blocks, index, face, corner);
-                        }
+                            BlockId neighbor = blocks[index + face.NeighborOffset];
+                            if (!neighbor.IsAir && (isTranslucent || !BlockPalette.IsTranslucent(neighbor)))
+                            {
+                                continue;
+                            }
 
-                        if (!builder.TryAddQuad(x, y, z, face, color, ao))
-                        {
-                            return new ChunkMesh(opaque.Build(), translucent.Build(), visibility);
+                            for (int corner = 0; corner < 4; corner++)
+                            {
+                                ao[corner] = OcclusionLevel(blocks, index, face, corner);
+                            }
+
+                            MeshBuilder builder = isTranslucent
+                                ? (translucent ??= new MeshBuilder())
+                                : (opaque ??= new MeshBuilder());
+                            if (!builder.TryAddQuad(x, y, z, face, color, ao))
+                            {
+                                return new ChunkMesh(opaque?.Build() ?? MeshData.Empty, translucent?.Build() ?? MeshData.Empty, visibility);
+                            }
                         }
                     }
                 }
             }
-        }
 
-        return new ChunkMesh(opaque.Build(), translucent.Build(), visibility);
+            return new ChunkMesh(opaque?.Build() ?? MeshData.Empty, translucent?.Build() ?? MeshData.Empty, visibility);
+        }
+        finally
+        {
+            opaque?.Dispose();
+            translucent?.Dispose();
+        }
     }
 
     // Ambient occlusion for one corner of a face. In the layer just outside the face, the two blocks beside the
