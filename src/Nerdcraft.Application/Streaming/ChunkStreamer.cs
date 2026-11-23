@@ -18,7 +18,7 @@ namespace Nerdcraft.Application.Streaming;
 /// </summary>
 /// <param name="world">The world to fill with generated chunks.</param>
 /// <param name="queue">Source of background generation and meshing.</param>
-/// <param name="settings">Supplies render distance, world bounds and the per-frame upload budget.</param>
+/// <param name="settings">Supplies render distance, world bounds and the per-frame budgets for uploads, chunk installs and mesh requests.</param>
 public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameSettings settings)
 {
     private readonly Dictionary<ChunkPosition, Entry> _entries = [];
@@ -33,7 +33,12 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
     private int _scannedRevision = -1;
     private bool _rescan = true;
 
-    /// <summary>Unloads chunks that left range, installs finished terrain, and requests new work around the camera. Makes no renderer calls.</summary>
+    /// <summary>
+    /// Unloads chunks that left range, installs finished terrain, and requests new work around the camera. Makes no
+    /// renderer calls. Installs at most <see cref="GameSettings.MaxChunkInstallsPerFrame"/> chunks and starts at most
+    /// <see cref="GameSettings.MaxMeshRequestsPerFrame"/> mesh requests per call, so a burst of finished work spreads
+    /// over several frames.
+    /// </summary>
     /// <param name="cameraPosition">Camera position in world space.</param>
     public void Update(Vector3 cameraPosition)
     {
@@ -186,12 +191,15 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
 
     private void InstallGeneratedChunks()
     {
-        while (queue.TryTakeGenerated(out GeneratedChunk result))
+        // Results beyond the budget stay queued for the next frame; stale ones are cheap and do not count.
+        int installed = 0;
+        while (installed < settings.MaxChunkInstallsPerFrame && queue.TryTakeGenerated(out GeneratedChunk result))
         {
             if (_entries.TryGetValue(result.Position, out Entry? entry) && !entry.Loaded)
             {
                 world.LoadChunk(result.Position, result.Blocks.AsSpan(0, Chunk.Volume));
                 entry.Loaded = true;
+                installed++;
             }
 
             ArrayPool<BlockId>.Shared.Return(result.Blocks);
@@ -199,9 +207,10 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
     }
 
     // Walks columns nearest-first so the area around the camera fills in before the horizon. Returns false when the
-    // queue refused a request, so the walk stopped early and must run again.
+    // queue refused a request or the per-frame mesh budget ran out, so the walk stopped early and must run again.
     private bool RequestWork(int cameraX, int cameraZ)
     {
+        int meshRequests = 0;
         foreach ((int dx, int dz) in _loadOffsets)
         {
             for (int y = settings.Bounds.MinChunkY; y <= settings.Bounds.MaxChunkY; y++)
@@ -234,11 +243,14 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
                     continue;
                 }
 
-                if (NeedsMesh(position, entry)
-                    && NeighborsSettled(position, cameraX, cameraZ)
-                    && !TryRequestMesh(position, entry))
+                if (NeedsMesh(position, entry) && NeighborsSettled(position, cameraX, cameraZ))
                 {
-                    return false;
+                    if (meshRequests == settings.MaxMeshRequestsPerFrame || !TryRequestMesh(position, entry))
+                    {
+                        return false; // Over budget or refused: the scan stops here and runs again next frame.
+                    }
+
+                    meshRequests++;
                 }
             }
         }

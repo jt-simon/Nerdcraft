@@ -155,6 +155,38 @@ public class ChunkStreamerTests
     }
 
     [Fact]
+    public void Update_MoreGeneratedChunksThanBudget_InstallsAtMostTheBudgetPerFrame()
+    {
+        ChunkStreamer limited = new(
+            _world,
+            new InlineChunkWorkQueue(new HalfSlabGenerator(), new CulledChunkMesher()),
+            _settings with { MaxChunkInstallsPerFrame = 2 });
+
+        limited.Update(Camera); // Requests generation.
+        limited.Update(Camera);
+        Assert.Equal(2, _world.LoadedChunks.Count);
+
+        limited.Update(Camera);
+        limited.Update(Camera);
+        Assert.Equal(ChunksInWorld, _world.LoadedChunks.Count);
+    }
+
+    [Fact]
+    public void Update_MoreMeshableChunksThanBudget_RequestsAtMostTheBudgetPerFrame()
+    {
+        InlineChunkWorkQueue queue = new(new HalfSlabGenerator(), new CulledChunkMesher());
+        ChunkStreamer limited = new(_world, queue, _settings with { MaxMeshRequestsPerFrame = 2 });
+
+        limited.Update(Camera); // Requests generation.
+        limited.Update(Camera);
+        Assert.Equal(2, queue.MeshRequests);
+
+        limited.Update(Camera);
+        limited.Update(Camera);
+        Assert.Equal(ChunksInWorld, queue.MeshRequests);
+    }
+
+    [Fact]
     public void UploadCompleted_MoreMeshesThanBudget_UploadsAtMostTheBudgetPerFrame()
     {
         ChunkStreamer limited = new(

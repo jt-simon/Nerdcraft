@@ -22,6 +22,7 @@ contain breaking changes.
 - Surface materials by height: gravel on the deep seabed, sand on the shallow seabed and beaches, grass over dirt in between, bare stone on high ground and snow on the peaks. Band edges are shifted by noise so they wander. New block types `Sand`, `Gravel`, `Snow` and `Water`.
 - `IRenderer.DrawTranslucentMesh`, a blended draw pass without depth writes, and `BlockPalette.IsTranslucent`.
 - `VoxelWorld.Revision`, a counter that increases whenever a chunk is loaded or unloaded or a block changes.
+- `GameSettings.MaxChunkInstallsPerFrame` (default 64) and `MaxMeshRequestsPerFrame` (default 16), which spread the main-thread work of a burst of finished chunks over several frames instead of stalling one.
 
 ### Changed
 
@@ -42,6 +43,7 @@ contain breaking changes.
 - Meshing is about 20% faster: the ambient occlusion lookups for each face corner use precomputed offsets. The meshes are unchanged.
 - `RaylibRenderer` no longer uploads vertex normals, which the default material does not use, saving about 40% of each mesh's video memory and upload size.
 - Default `GameSettings.MaxUploadsPerFrame` is now 8 (was 4), which roughly halves the time to fill the view at the default render distance.
+- Startup is smoother: the worst frame while the first chunks load dropped from about 40-60 ms to about 12-22 ms in a headless simulation.
 
 ## [0.1.0] - 2026-11-22
 

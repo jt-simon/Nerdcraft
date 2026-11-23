@@ -22,6 +22,18 @@ public sealed record GameSettings
     /// <summary>Completed meshes uploaded to the GPU per frame, to avoid hitches when many finish at once. At least 1. The initial fill at the default render distance takes about 6 s at 8 and about 11 s at 4; 16 held 60 FPS on a desktop GPU but leaves less margin on integrated graphics.</summary>
     public int MaxUploadsPerFrame { get; init; } = 8;
 
+    /// <summary>
+    /// Generated chunks installed into the world per frame. Installing a chunk copies it and invalidates its neighbors,
+    /// so a burst of finished columns would otherwise stall one frame; the rest wait for the next. At least 1.
+    /// </summary>
+    public int MaxChunkInstallsPerFrame { get; init; } = 64;
+
+    /// <summary>
+    /// Meshing requests started per frame. Each copies a chunk and its borders on the main thread before a worker meshes
+    /// it, so starting hundreds in one frame would stall it; the rest wait for the next. At least 1.
+    /// </summary>
+    public int MaxMeshRequestsPerFrame { get; init; } = 16;
+
     /// <summary>Seed for terrain generation; the same seed produces the same world.</summary>
     public int Seed { get; init; } = 1337;
 
@@ -34,6 +46,8 @@ public sealed record GameSettings
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(Bounds.MaxY, Bounds.MinY);
         ArgumentOutOfRangeException.ThrowIfLessThan(WorkerCount, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(MaxUploadsPerFrame, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(MaxChunkInstallsPerFrame, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(MaxMeshRequestsPerFrame, 1);
         if (!(FovYDegrees is > 0f and < 180f))
         {
             throw new ArgumentOutOfRangeException(nameof(FovYDegrees), FovYDegrees, "Field of view must be between 0 and 180 degrees, exclusive.");
