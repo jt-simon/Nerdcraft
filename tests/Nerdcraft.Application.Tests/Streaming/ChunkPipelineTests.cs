@@ -23,7 +23,7 @@ public class ChunkPipelineTests
         List<ChunkPosition> requested = [.. Enumerable.Range(0, 20).Select(i => new ChunkPosition(i, 1, -i))];
         foreach (ChunkPosition position in requested)
         {
-            Assert.True(pipeline.TryRequestGenerate(position));
+            Assert.True(pipeline.TryRequestGenerateColumn(position.X, position.Z, position.Y, position.Y));
         }
 
         List<ChunkPosition> received = [];
@@ -60,6 +60,41 @@ public class ChunkPipelineTests
     }
 
     [Fact]
+    public async Task GenerateColumn_ManyRows_ReturnsEachRowAtItsOwnPosition()
+    {
+        HeightmapTerrainGenerator generator = new(5, WorldBounds.Default);
+        await using ChunkPipeline pipeline = new(generator, new CulledChunkMesher(), workerCount: 2);
+        Assert.True(pipeline.TryRequestGenerateColumn(3, -2, -1, 1));
+
+        Dictionary<ChunkPosition, BlockId[]> received = [];
+        await WaitUntilAsync(() =>
+        {
+            while (pipeline.TryTakeGenerated(out GeneratedChunk chunk))
+            {
+                received[chunk.Position] = chunk.Blocks.AsSpan(0, Chunk.Volume).ToArray();
+                ArrayPool<BlockId>.Shared.Return(chunk.Blocks);
+            }
+
+            return received.Count == 3;
+        });
+
+        foreach ((ChunkPosition position, BlockId[] blocks) in received)
+        {
+            BlockId[] expected = new BlockId[Chunk.Volume];
+            generator.Generate(position, expected);
+            Assert.Equal(expected, blocks);
+        }
+    }
+
+    [Fact]
+    public async Task TryRequestGenerateColumn_MaxBelowMin_ThrowsOnTheCallingThread()
+    {
+        await using ChunkPipeline pipeline = new(new HeightmapTerrainGenerator(5, WorldBounds.Default), new CulledChunkMesher(), workerCount: 1);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => pipeline.TryRequestGenerateColumn(0, 0, 2, 1));
+    }
+
+    [Fact]
     public async Task Request_WhenQueueIsFull_ReturnsFalse()
     {
         using ManualResetEventSlim release = new();
@@ -68,7 +103,7 @@ public class ChunkPipelineTests
 
         // The worker takes one job and blocks; two more fill the queue.
         int accepted = 0;
-        while (pipeline.TryRequestGenerate(new ChunkPosition(accepted, 0, 0)) && accepted < 10)
+        while (pipeline.TryRequestGenerateColumn(accepted, 0, 0, 0) && accepted < 10)
         {
             accepted++;
             await Task.Delay(20, TestContext.Current.CancellationToken);
@@ -85,7 +120,7 @@ public class ChunkPipelineTests
         ChunkPipeline pipeline = new(generator, new CulledChunkMesher(), workerCount: 1, queueCapacity: 32);
         for (int i = 0; i < 30; i++)
         {
-            pipeline.TryRequestGenerate(new ChunkPosition(i, 0, 0));
+            pipeline.TryRequestGenerateColumn(i, 0, 0, 0);
         }
 
         await WaitUntilAsync(() => generator.Calls >= 1); // Dispose only once the worker has really started.
@@ -99,7 +134,7 @@ public class ChunkPipelineTests
     {
         await using ChunkPipeline pipeline = new(
             new ThrowingGenerator(new InvalidOperationException("boom")), new CulledChunkMesher(), workerCount: 1);
-        pipeline.TryRequestGenerate(new ChunkPosition(0, 0, 0));
+        pipeline.TryRequestGenerateColumn(0, 0, 0, 0);
 
         await WaitForFaultAsync<InvalidOperationException>(pipeline);
     }
@@ -109,7 +144,7 @@ public class ChunkPipelineTests
     {
         await using ChunkPipeline pipeline = new(
             new ThrowingGenerator(new OperationCanceledException()), new CulledChunkMesher(), workerCount: 1);
-        pipeline.TryRequestGenerate(new ChunkPosition(0, 0, 0));
+        pipeline.TryRequestGenerateColumn(0, 0, 0, 0);
 
         await WaitForFaultAsync<OperationCanceledException>(pipeline);
     }

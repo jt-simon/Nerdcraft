@@ -36,6 +36,7 @@ contain breaking changes.
 - Chunks with no solid blocks are no longer meshed, and terrain generation skips noise sampling for chunks above the highest possible surface.
 - Terrain noise now uses FastNoiseLite (OpenSimplex2), vendored under `Nerdcraft.Domain`. Every seed generates a different world than before.
 - Terrain now sits higher: about 30% of columns are below sea level (Y = 0), down from about two-thirds, so a future ocean covers a minority of the map.
+- Terrain is generated a whole column at a time, so the heightmap is computed once per column instead of once per chunk, which is about 2x faster. `IChunkWorkQueue.TryRequestGenerate` is replaced by `TryRequestGenerateColumn`, and `ITerrainGenerator` gains `GenerateColumn` (the default implementation calls `Generate` per chunk).
 
 ## [0.1.0] - 2026-11-22
 

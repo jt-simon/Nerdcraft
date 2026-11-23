@@ -25,8 +25,17 @@ public readonly record struct MeshedChunk(ChunkPosition Position, int Version, C
 /// </summary>
 public interface IChunkWorkQueue
 {
-    /// <summary>Returns false when the queue is full; the caller retries on a later frame.</summary>
-    bool TryRequestGenerate(ChunkPosition position);
+    /// <summary>
+    /// Requests terrain for every chunk of one column, <paramref name="minChunkY"/> through <paramref name="maxChunkY"/>
+    /// inclusive. Each chunk comes back as its own <see cref="GeneratedChunk"/>, in any order. Returns false when the
+    /// queue is full; the caller retries on a later frame.
+    /// </summary>
+    /// <param name="chunkX">Chunk X of the column.</param>
+    /// <param name="chunkZ">Chunk Z of the column.</param>
+    /// <param name="minChunkY">Chunk Y of the lowest row.</param>
+    /// <param name="maxChunkY">Chunk Y of the highest row. Must not be below <paramref name="minChunkY"/>.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="maxChunkY"/> is below <paramref name="minChunkY"/>.</exception>
+    bool TryRequestGenerateColumn(int chunkX, int chunkZ, int minChunkY, int maxChunkY);
 
     /// <summary>Takes ownership of <paramref name="snapshot"/> only when it returns true.</summary>
     bool TryRequestMesh(ChunkSnapshot snapshot);

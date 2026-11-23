@@ -198,12 +198,17 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
 
                 if (!_entries.TryGetValue(position, out Entry? entry))
                 {
-                    if (!queue.TryRequestGenerate(position))
+                    // A column is requested whole so its workers share the heightmap; every row gets an entry at once.
+                    if (!queue.TryRequestGenerateColumn(position.X, position.Z, settings.Bounds.MinChunkY, settings.Bounds.MaxChunkY))
                     {
                         return;
                     }
 
-                    _entries[position] = new Entry();
+                    for (int row = settings.Bounds.MinChunkY; row <= settings.Bounds.MaxChunkY; row++)
+                    {
+                        _entries[position with { Y = row }] = new Entry();
+                    }
+
                     continue;
                 }
 

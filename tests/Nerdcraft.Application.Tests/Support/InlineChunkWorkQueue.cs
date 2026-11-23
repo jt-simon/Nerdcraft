@@ -16,11 +16,16 @@ public sealed class InlineChunkWorkQueue(ITerrainGenerator generator, IChunkMesh
     private readonly Queue<GeneratedChunk> _generated = [];
     private readonly Queue<MeshedChunk> _meshed = [];
 
-    public bool TryRequestGenerate(ChunkPosition position)
+    public bool TryRequestGenerateColumn(int chunkX, int chunkZ, int minChunkY, int maxChunkY)
     {
-        BlockId[] blocks = ArrayPool<BlockId>.Shared.Rent(Chunk.Volume);
-        generator.Generate(position, blocks.AsSpan(0, Chunk.Volume));
-        _generated.Enqueue(new GeneratedChunk(position, blocks));
+        for (int y = minChunkY; y <= maxChunkY; y++)
+        {
+            ChunkPosition position = new(chunkX, y, chunkZ);
+            BlockId[] blocks = ArrayPool<BlockId>.Shared.Rent(Chunk.Volume);
+            generator.Generate(position, blocks.AsSpan(0, Chunk.Volume));
+            _generated.Enqueue(new GeneratedChunk(position, blocks));
+        }
+
         return true;
     }
 
