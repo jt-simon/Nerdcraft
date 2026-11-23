@@ -40,6 +40,7 @@ contain breaking changes.
 - Terrain is generated a whole column at a time, so the heightmap is computed once per column instead of once per chunk, which is about 2x faster. `IChunkWorkQueue.TryRequestGenerate` is replaced by `TryRequestGenerateColumn`, and `ITerrainGenerator` gains `GenerateColumn` (the default implementation calls `Generate` per chunk).
 - The chunk streamer skips its per-frame scan of every chunk in range unless the camera crossed a chunk border, the world changed, or a mesh request finished or was refused.
 - Meshing is about 20% faster: the ambient occlusion lookups for each face corner use precomputed offsets. The meshes are unchanged.
+- `RaylibRenderer` no longer uploads vertex normals, which the default material does not use, saving about 40% of each mesh's video memory and upload size.
 
 ## [0.1.0] - 2026-11-22
 
