@@ -167,9 +167,17 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
                     continue;
                 }
 
-                if (entry.Loaded
-                    && entry.MeshRequestedVersion is null
-                    && NeedsMesh(position, entry)
+                if (!entry.Loaded || entry.MeshRequestedVersion is not null)
+                {
+                    continue;
+                }
+
+                if (SkipIfEmpty(position, entry))
+                {
+                    continue;
+                }
+
+                if (NeedsMesh(position, entry)
                     && NeighborsSettled(position, cameraX, cameraZ)
                     && !TryRequestMesh(position, entry))
                 {
@@ -177,6 +185,29 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
                 }
             }
         }
+    }
+
+    // An all-air chunk emits no faces whatever its neighbors hold, so it needs no snapshot or mesh. If it was
+    // emptied after a mesh was uploaded, that mesh is stale and is released.
+    private bool SkipIfEmpty(ChunkPosition position, Entry entry)
+    {
+        if (!world.TryGetChunk(position, out Chunk chunk) || !chunk.IsEmpty)
+        {
+            return false;
+        }
+
+        if (chunk.Version != entry.MeshedVersion)
+        {
+            if (entry.Handle is { } handle)
+            {
+                _pendingRelease.Add(handle);
+                entry.Handle = null;
+            }
+
+            entry.MeshedVersion = chunk.Version;
+        }
+
+        return true;
     }
 
     private bool NeedsMesh(ChunkPosition position, Entry entry)

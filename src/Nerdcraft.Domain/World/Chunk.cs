@@ -24,6 +24,8 @@ public sealed class Chunk
 
     private readonly BlockId[] _blocks = new BlockId[Volume];
 
+    private int _solidCount;
+
     /// <summary>Creates an empty chunk at version 0.</summary>
     public Chunk()
     {
@@ -37,6 +39,9 @@ public sealed class Chunk
     /// <see cref="VoxelWorld"/> keeps it increasing across an unload and reload of the same position.
     /// </summary>
     public int Version { get; private set; }
+
+    /// <summary>True when every block is air, so the chunk can never produce geometry.</summary>
+    public bool IsEmpty => _solidCount == 0;
 
     /// <summary>Position of a local coordinate in <see cref="Blocks"/>, laid out Y-major, then Z, then X. Does not bounds-check.</summary>
     public static int Index(int x, int y, int z) => (y << (SizeShift * 2)) | (z << SizeShift) | x;
@@ -55,11 +60,13 @@ public sealed class Chunk
     {
         ThrowIfOutOfBounds(x, y, z);
         int index = Index(x, y, z);
-        if (_blocks[index] == block)
+        BlockId previous = _blocks[index];
+        if (previous == block)
         {
             return;
         }
 
+        _solidCount += (block.IsAir ? 0 : 1) - (previous.IsAir ? 0 : 1);
         _blocks[index] = block;
         Version++;
     }
@@ -71,6 +78,7 @@ public sealed class Chunk
     internal void Load(ReadOnlySpan<BlockId> source)
     {
         source.CopyTo(_blocks);
+        _solidCount = Volume - source.Count(BlockId.Air);
         Version++;
     }
 

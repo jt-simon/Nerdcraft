@@ -47,6 +47,33 @@ public class HeightmapTerrainGeneratorTests
     }
 
     [Fact]
+    public void Generate_ChunkHoldingHighestSurface_IsNotSkipped()
+    {
+        // The early-out for chunks above the terrain must never cut off real terrain.
+        HeightmapTerrainGenerator generator = new(3, WorldBounds.Default);
+        int highest = int.MinValue;
+        int highestX = 0;
+        int highestZ = 0;
+        for (int z = -3000; z <= 3000; z += 23)
+        {
+            for (int x = -3000; x <= 3000; x += 23)
+            {
+                int height = generator.SurfaceHeight(x, z);
+                if (height > highest)
+                {
+                    (highest, highestX, highestZ) = (height, x, z);
+                }
+            }
+        }
+
+        BlockPosition top = new(highestX, highest, highestZ);
+        BlockId[] blocks = new BlockId[Chunk.Volume];
+        generator.Generate(top.ChunkPosition, blocks);
+
+        Assert.Equal(BlockTypes.Grass, blocks[Chunk.Index(top.LocalX, top.LocalY, top.LocalZ)]);
+    }
+
+    [Fact]
     public void Generate_Column_HasGrassOverDirtOverStone()
     {
         HeightmapTerrainGenerator generator = new(7, WorldBounds.Default);

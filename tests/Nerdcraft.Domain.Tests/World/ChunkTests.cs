@@ -30,6 +30,23 @@ public class ChunkTests
     }
 
     [Fact]
+    public void IsEmpty_BlockSetThenCleared_IsTrueAgain()
+    {
+        Chunk chunk = new();
+        Assert.True(chunk.IsEmpty);
+
+        chunk.Set(1, 2, 3, BlockTypes.Stone);
+        chunk.Set(4, 5, 6, BlockTypes.Dirt);
+        Assert.False(chunk.IsEmpty);
+
+        chunk.Set(1, 2, 3, BlockTypes.Air);
+        Assert.False(chunk.IsEmpty); // One block is still solid.
+
+        chunk.Set(4, 5, 6, BlockTypes.Air);
+        Assert.True(chunk.IsEmpty);
+    }
+
+    [Fact]
     public void Set_SameBlock_DoesNotIncrementVersion()
     {
         Chunk chunk = new();
