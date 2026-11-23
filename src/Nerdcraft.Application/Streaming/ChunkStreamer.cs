@@ -28,6 +28,11 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
     private readonly (int Dx, int Dz)[] _loadOffsets = BuildLoadOffsets(settings.RenderDistance);
     private (int X, int Z)? _lastCameraChunk;
 
+    // The scan in RequestWork only has new work to find after one of these changes: the camera crossing a chunk border,
+    // the world changing (Revision), or a mesh request finishing or being refused. Otherwise it is skipped.
+    private int _scannedRevision = -1;
+    private bool _rescan = true;
+
     /// <summary>Unloads chunks that left range, installs finished terrain, and requests new work around the camera. Makes no renderer calls.</summary>
     /// <param name="cameraPosition">Camera position in world space.</param>
     public void Update(Vector3 cameraPosition)
@@ -35,14 +40,19 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
         int cameraX = FloorToChunk(cameraPosition.X);
         int cameraZ = FloorToChunk(cameraPosition.Z);
 
-        if (_lastCameraChunk != (cameraX, cameraZ))
+        bool cameraMoved = _lastCameraChunk != (cameraX, cameraZ);
+        if (cameraMoved)
         {
             _lastCameraChunk = (cameraX, cameraZ);
             UnloadDistantChunks(cameraX, cameraZ);
         }
 
         InstallGeneratedChunks();
-        RequestWork(cameraX, cameraZ);
+        if (cameraMoved || _rescan || world.Revision != _scannedRevision)
+        {
+            _scannedRevision = world.Revision;
+            _rescan = !RequestWork(cameraX, cameraZ);
+        }
     }
 
     /// <summary>Releases meshes that were replaced or unloaded, then uploads up to <see cref="GameSettings.MaxUploadsPerFrame"/> finished meshes. Meshes built from outdated chunk contents are discarded.</summary>
@@ -71,6 +81,7 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
             }
 
             entry.MeshRequestedVersion = null;
+            _rescan = true; // An edit made while this mesh was in flight was skipped by the scan; scan again to request the new mesh.
             if (chunk.Version != result.Version)
             {
                 continue; // Blocks changed while meshing; the next scan requests a fresh mesh.
@@ -187,8 +198,9 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
         }
     }
 
-    // Walks columns nearest-first so the area around the camera fills in before the horizon.
-    private void RequestWork(int cameraX, int cameraZ)
+    // Walks columns nearest-first so the area around the camera fills in before the horizon. Returns false when the
+    // queue refused a request, so the walk stopped early and must run again.
+    private bool RequestWork(int cameraX, int cameraZ)
     {
         foreach ((int dx, int dz) in _loadOffsets)
         {
@@ -201,7 +213,7 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
                     // A column is requested whole so its workers share the heightmap; every row gets an entry at once.
                     if (!queue.TryRequestGenerateColumn(position.X, position.Z, settings.Bounds.MinChunkY, settings.Bounds.MaxChunkY))
                     {
-                        return;
+                        return false;
                     }
 
                     for (int row = settings.Bounds.MinChunkY; row <= settings.Bounds.MaxChunkY; row++)
@@ -226,10 +238,12 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
                     && NeighborsSettled(position, cameraX, cameraZ)
                     && !TryRequestMesh(position, entry))
                 {
-                    return;
+                    return false;
                 }
             }
         }
+
+        return true;
     }
 
     // An all-air chunk emits no faces whatever its neighbors hold, so it needs no snapshot or mesh. If it was

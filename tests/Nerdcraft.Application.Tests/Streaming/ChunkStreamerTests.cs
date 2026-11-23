@@ -132,6 +132,28 @@ public class ChunkStreamerTests
         Assert.Equal(ChunksInWorld, _renderer.Uploads.Count);
     }
 
+    [Theory]
+    [InlineData(0)] // Generation requests are refused.
+    [InlineData(1)] // Mesh requests are refused.
+    public void Update_QueueRefusesRequests_RetriesOnLaterFrames(int framesBeforeRefusing)
+    {
+        InlineChunkWorkQueue queue = new(new HalfSlabGenerator(), new CulledChunkMesher());
+        ChunkStreamer streamer = new(_world, queue, _settings);
+
+        for (int frame = 0; frame < 10; frame++)
+        {
+            if (frame == framesBeforeRefusing)
+            {
+                queue.RefusedRequests = 2;
+            }
+
+            streamer.Update(Camera);
+            streamer.UploadCompleted(_renderer);
+        }
+
+        Assert.Equal(ChunksInWorld, _renderer.Uploads.Count);
+    }
+
     [Fact]
     public void UploadCompleted_MoreMeshesThanBudget_UploadsAtMostTheBudgetPerFrame()
     {
@@ -150,13 +172,20 @@ public class ChunkStreamerTests
         Assert.Equal(ChunksInWorld, _renderer.Uploads.Count);
     }
 
-    [Fact]
-    public void UploadCompleted_DiscardsMeshBuiltFromOutdatedBlocks_ThenRemeshes()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)] // The scan already saw the edit, and skipped the chunk because its mesh was outstanding.
+    public void UploadCompleted_DiscardsMeshBuiltFromOutdatedBlocks_ThenRemeshes(bool scanBeforeUpload)
     {
         _streamer.Update(Camera);
         _streamer.Update(Camera); // Meshes are complete but not yet uploaded.
 
         _world.SetBlock(new BlockPosition(8, 8, 8), BlockTypes.Stone); // Edits chunk (0,0,0) mid-flight.
+        if (scanBeforeUpload)
+        {
+            _streamer.Update(Camera);
+        }
+
         _streamer.UploadCompleted(_renderer);
         Assert.Equal(ChunksInWorld - 1, _renderer.Uploads.Count);
 

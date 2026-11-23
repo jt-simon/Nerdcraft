@@ -16,8 +16,16 @@ public sealed class InlineChunkWorkQueue(ITerrainGenerator generator, IChunkMesh
     private readonly Queue<GeneratedChunk> _generated = [];
     private readonly Queue<MeshedChunk> _meshed = [];
 
+    /// <summary>Number of upcoming generate and mesh requests to refuse, as a full queue would.</summary>
+    public int RefusedRequests { get; set; }
+
     public bool TryRequestGenerateColumn(int chunkX, int chunkZ, int minChunkY, int maxChunkY)
     {
+        if (Refuse())
+        {
+            return false;
+        }
+
         for (int y = minChunkY; y <= maxChunkY; y++)
         {
             ChunkPosition position = new(chunkX, y, chunkZ);
@@ -34,9 +42,25 @@ public sealed class InlineChunkWorkQueue(ITerrainGenerator generator, IChunkMesh
 
     public bool TryRequestMesh(ChunkSnapshot snapshot)
     {
+        if (Refuse())
+        {
+            return false;
+        }
+
         MeshRequests++;
         _meshed.Enqueue(new MeshedChunk(snapshot.Position, snapshot.Version, mesher.Mesh(snapshot)));
         snapshot.Dispose();
+        return true;
+    }
+
+    private bool Refuse()
+    {
+        if (RefusedRequests == 0)
+        {
+            return false;
+        }
+
+        RefusedRequests--;
         return true;
     }
 
