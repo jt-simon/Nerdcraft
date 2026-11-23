@@ -9,7 +9,9 @@ namespace Nerdcraft.Domain.World.Generation;
 /// Generates terrain from layered OpenSimplex2 noise: a continent layer sets the base height around sea level
 /// (Y = 0), a mountain mask decides how much relief an area gets, and hill noise adds the relief. Each
 /// column is grass on the surface, <c>DirtDepth</c> (3) layers of dirt, then stone, with bedrock on the
-/// bottom layer of the world. There is no water and no caves yet. The same seed and bounds always yield the same world.
+/// bottom layer of the world. Caves are carved out of the stone afterwards from 3D noise: large caverns and
+/// winding tunnels, which stay sealed below the surface except for occasional openings. There is no water yet.
+/// The same seed and bounds always yield the same world.
 /// </summary>
 public sealed class HeightmapTerrainGenerator : ITerrainGenerator
 {
@@ -28,6 +30,20 @@ public sealed class HeightmapTerrainGenerator : ITerrainGenerator
     private const int ContinentSeedOffset = 101;
     private const int MountainSeedOffset = 202;
     private const int HillSeedOffset = 303;
+    private const int CavernSeedOffset = 404;
+    private const int TunnelASeedOffset = 505;
+    private const int TunnelBSeedOffset = 606;
+
+    // Caves. The noise is sampled on a lattice every LatticeStep blocks and interpolated, which is about 64 times
+    // cheaper than sampling every block and stays continuous across chunk borders because the lattice is aligned
+    // to world coordinates (chunk origins are multiples of LatticeStep).
+    private const int LatticeStep = 4;
+    private const int LatticePoints = (Chunk.Size / LatticeStep) + 1;
+    private const int CaveFloorMargin = 3; // Blocks within this distance above the world's bottom are never carved.
+    private const float CavernThreshold = 0.55f; // A cavern is where its noise exceeds this.
+    private const float TunnelWidth = 0.09f; // A tunnel is where both tunnel noises are within this of zero.
+    private const int OpeningDepth = 8; // Within this many blocks of the surface, carving needs a stronger signal.
+    private const float OpeningStrictness = 0.85f; // The score a block exactly at the surface needs to be carved.
 
     private readonly WorldBounds _bounds;
 
@@ -35,6 +51,9 @@ public sealed class HeightmapTerrainGenerator : ITerrainGenerator
     private readonly FastNoiseLite _continent;
     private readonly FastNoiseLite _mountains;
     private readonly FastNoiseLite _hills;
+    private readonly FastNoiseLite _caverns;
+    private readonly FastNoiseLite _tunnelsA;
+    private readonly FastNoiseLite _tunnelsB;
 
     // Highest block Y any column can reach, assuming full-range noise; chunks above it are all air.
     private readonly int _maxSurface;
@@ -50,6 +69,9 @@ public sealed class HeightmapTerrainGenerator : ITerrainGenerator
         _continent = CreateLayer(seed + ContinentSeedOffset, scale: 1000f, octaves: 3);
         _mountains = CreateLayer(seed + MountainSeedOffset, scale: 800f, octaves: 2);
         _hills = CreateLayer(seed + HillSeedOffset, scale: 300f, octaves: 3);
+        _caverns = CreateCaveLayer(seed + CavernSeedOffset, scale: 55f, octaves: 2);
+        _tunnelsA = CreateCaveLayer(seed + TunnelASeedOffset, scale: 48f, octaves: 1);
+        _tunnelsB = CreateCaveLayer(seed + TunnelBSeedOffset, scale: 48f, octaves: 1);
         _maxSurface = Math.Min(
             (int)MathF.Ceiling(ContinentOffset + (NoiseScale * (ContinentAmplitude + PlainsRelief + MountainRelief))),
             bounds.MaxY);
@@ -65,11 +87,13 @@ public sealed class HeightmapTerrainGenerator : ITerrainGenerator
             return;
         }
 
+        Span<int> surfaces = stackalloc int[Chunk.Size * Chunk.Size];
         for (int z = 0; z < Chunk.Size; z++)
         {
             for (int x = 0; x < Chunk.Size; x++)
             {
                 int surface = SurfaceHeight(origin.X + x, origin.Z + z);
+                surfaces[(z * Chunk.Size) + x] = surface;
                 for (int y = 0; y < Chunk.Size; y++)
                 {
                     int worldY = origin.Y + y;
@@ -90,6 +114,8 @@ public sealed class HeightmapTerrainGenerator : ITerrainGenerator
                 }
             }
         }
+
+        CarveCaves(origin, surfaces, blocks);
     }
 
     /// <summary>
@@ -113,6 +139,122 @@ public sealed class HeightmapTerrainGenerator : ITerrainGenerator
 
         int height = (int)MathF.Floor(baseHeight + relief);
         return Math.Clamp(height, _bounds.MinY + 1, _bounds.MaxY);
+    }
+
+    // Turns blocks to air where the cave noise is strong enough. Each block gets a score in (0, 1] from the cavern and
+    // tunnel noise (0 means "not cave"); it is carved when the score beats a bar that is 0 deep underground and rises
+    // to OpeningStrictness at the surface. So caves are solid-roofed except where the noise is at its very strongest.
+    private void CarveCaves(BlockPosition origin, ReadOnlySpan<int> surfaces, Span<BlockId> blocks)
+    {
+        int lowestCarved = _bounds.MinY + CaveFloorMargin;
+        if (origin.Y + Chunk.Size - 1 < lowestCarved)
+        {
+            return;
+        }
+
+        Span<float> caverns = stackalloc float[LatticePoints * LatticePoints * LatticePoints];
+        Span<float> tunnelsA = stackalloc float[caverns.Length];
+        Span<float> tunnelsB = stackalloc float[caverns.Length];
+        SampleLattice(_caverns, origin, caverns);
+        SampleLattice(_tunnelsA, origin, tunnelsA);
+        SampleLattice(_tunnelsB, origin, tunnelsB);
+
+        // Interpolated values never leave the range of the lattice values around them, so a chunk whose lattice
+        // shows no cavern above the threshold and no place where both tunnel noises can be near zero has no cave.
+        (float minA, float maxA) = Range(tunnelsA);
+        (float minB, float maxB) = Range(tunnelsB);
+        bool cavernPossible = Range(caverns).Max > CavernThreshold;
+        bool tunnelPossible = minA < TunnelWidth && maxA > -TunnelWidth && minB < TunnelWidth && maxB > -TunnelWidth;
+        if (!cavernPossible && !tunnelPossible)
+        {
+            return;
+        }
+
+        for (int z = 0; z < Chunk.Size; z++)
+        {
+            for (int x = 0; x < Chunk.Size; x++)
+            {
+                int surface = surfaces[(z * Chunk.Size) + x];
+                int first = Math.Max(lowestCarved - origin.Y, 0);
+                int last = Math.Min(surface - origin.Y, Chunk.Size - 1);
+                for (int y = first; y <= last; y++)
+                {
+                    int depth = surface - (origin.Y + y);
+                    float bar = depth >= OpeningDepth ? 0f : OpeningStrictness * (1f - ((float)depth / OpeningDepth));
+
+                    float cavern = (Interpolate(caverns, x, y, z) - CavernThreshold) / (1f - CavernThreshold);
+                    float tunnel = 1f - (MathF.Max(MathF.Abs(Interpolate(tunnelsA, x, y, z)), MathF.Abs(Interpolate(tunnelsB, x, y, z))) / TunnelWidth);
+                    float score = MathF.Max(cavern, tunnel);
+                    if (score > 0f && score > bar)
+                    {
+                        blocks[Chunk.Index(x, y, z)] = BlockId.Air;
+                    }
+                }
+            }
+        }
+    }
+
+    private static (float Min, float Max) Range(ReadOnlySpan<float> values)
+    {
+        float min = values[0];
+        float max = values[0];
+        foreach (float value in values)
+        {
+            min = MathF.Min(min, value);
+            max = MathF.Max(max, value);
+        }
+
+        return (min, max);
+    }
+
+    // Samples a noise at every lattice point of the chunk: LatticePoints per axis, LatticeStep blocks apart, in world coordinates.
+    private static void SampleLattice(FastNoiseLite noise, BlockPosition origin, Span<float> lattice)
+    {
+        for (int j = 0; j < LatticePoints; j++)
+        {
+            for (int k = 0; k < LatticePoints; k++)
+            {
+                for (int i = 0; i < LatticePoints; i++)
+                {
+                    lattice[LatticeIndex(i, j, k)] = noise.GetNoise(
+                        origin.X + (i * LatticeStep),
+                        origin.Y + (j * LatticeStep),
+                        origin.Z + (k * LatticeStep));
+                }
+            }
+        }
+    }
+
+    // Trilinear interpolation of a sampled lattice at a chunk-local block coordinate.
+    private static float Interpolate(ReadOnlySpan<float> lattice, int x, int y, int z)
+    {
+        int i = x / LatticeStep;
+        int j = y / LatticeStep;
+        int k = z / LatticeStep;
+        float fx = (x % LatticeStep) / (float)LatticeStep;
+        float fy = (y % LatticeStep) / (float)LatticeStep;
+        float fz = (z % LatticeStep) / (float)LatticeStep;
+
+        float x00 = Lerp(lattice[LatticeIndex(i, j, k)], lattice[LatticeIndex(i + 1, j, k)], fx);
+        float x10 = Lerp(lattice[LatticeIndex(i, j + 1, k)], lattice[LatticeIndex(i + 1, j + 1, k)], fx);
+        float x01 = Lerp(lattice[LatticeIndex(i, j, k + 1)], lattice[LatticeIndex(i + 1, j, k + 1)], fx);
+        float x11 = Lerp(lattice[LatticeIndex(i, j + 1, k + 1)], lattice[LatticeIndex(i + 1, j + 1, k + 1)], fx);
+        return Lerp(Lerp(x00, x10, fy), Lerp(x01, x11, fy), fz);
+    }
+
+    private static int LatticeIndex(int i, int j, int k) => (((j * LatticePoints) + k) * LatticePoints) + i;
+
+    private static float Lerp(float a, float b, float t) => a + ((b - a) * t);
+
+    private static FastNoiseLite CreateCaveLayer(int seed, float scale, int octaves)
+    {
+        FastNoiseLite noise = new(seed);
+        noise.SetNoiseType(FastNoiseLite.NoiseType.OpenSimplex2);
+        noise.SetRotationType3D(FastNoiseLite.RotationType3D.ImproveXZPlanes); // Y is up: keeps horizontal slices free of grid artifacts.
+        noise.SetFractalType(octaves > 1 ? FastNoiseLite.FractalType.FBm : FastNoiseLite.FractalType.None);
+        noise.SetFractalOctaves(octaves);
+        noise.SetFrequency(1f / scale);
+        return noise;
     }
 
     private static FastNoiseLite CreateLayer(int seed, float scale, int octaves)

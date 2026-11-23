@@ -15,6 +15,7 @@ contain breaking changes.
 - Bedrock block that always fills the bottom layer of the world.
 - `Chunk.IsEmpty`, which reports whether a chunk holds only air.
 - Ambient occlusion: block faces darken in corners and creases, including across chunk borders.
+- Caves: large caverns and winding tunnels carved from 3D noise, sealed below the surface except for occasional openings. The layers just above bedrock are never carved.
 
 ### Changed
 
