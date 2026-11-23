@@ -19,6 +19,9 @@ public sealed class FakeRenderer : IRenderer
 
     public List<MeshHandle> Draws { get; } = [];
 
+    /// <summary>Camera position passed to each <see cref="EndFrame"/>; null when the debug overlay was hidden.</summary>
+    public List<Vector3?> DebugOverlays { get; } = [];
+
     public MeshHandle UploadMesh(MeshData mesh)
     {
         MeshHandle handle = new(++_nextHandle);
@@ -34,7 +37,5 @@ public sealed class FakeRenderer : IRenderer
 
     public void DrawMesh(MeshHandle handle, Matrix4x4 transform) => Draws.Add(handle);
 
-    public void EndFrame()
-    {
-    }
+    public void EndFrame(Vector3? debugCameraPosition) => DebugOverlays.Add(debugCameraPosition);
 }

@@ -29,6 +29,7 @@ public sealed class NerdcraftGame : IAsyncDisposable
     private readonly ChunkStreamer _streamer;
     private readonly IAsyncDisposable? _workQueue;
     private readonly float _farPlane;
+    private bool _showDebug;
 
     /// <summary>Creates a game over the supplied work queue and world. If <paramref name="workQueue"/> is <see cref="IAsyncDisposable"/>, this game disposes it.</summary>
     /// <param name="settings">Configuration for streaming and the camera.</param>
@@ -60,10 +61,15 @@ public sealed class NerdcraftGame : IAsyncDisposable
     }
 
     /// <summary>Advances the camera by <paramref name="deltaSeconds"/> and requests any chunks it now needs. Does not touch the renderer.</summary>
-    /// <param name="input">This frame's input.</param>
+    /// <param name="input">This frame's input. Toggles the debug overlay when <see cref="InputState.ToggleDebug"/> is set.</param>
     /// <param name="deltaSeconds">Time since the previous frame, in seconds.</param>
     public void Update(InputState input, float deltaSeconds)
     {
+        if (input.ToggleDebug)
+        {
+            _showDebug = !_showDebug;
+        }
+
         _camera.Apply(input, deltaSeconds);
         _streamer.Update(_camera.Position);
     }
@@ -78,7 +84,7 @@ public sealed class NerdcraftGame : IAsyncDisposable
 
         renderer.BeginFrame(view, SkyColor);
         _streamer.Draw(renderer, frustum);
-        renderer.EndFrame();
+        renderer.EndFrame(_showDebug ? _camera.Position : null);
     }
 
     /// <summary>Stops background workers (when the work queue is disposable) and waits for them to finish.</summary>

@@ -8,7 +8,7 @@ using Raylib_cs;
 
 namespace Nerdcraft.Rendering.Raylib;
 
-/// <summary>Reads raylib keyboard and mouse state into an <see cref="InputState"/>. Owns the key bindings: WASD, Space/Left Ctrl, Left Shift.</summary>
+/// <summary>Reads raylib keyboard and mouse state into an <see cref="InputState"/>. Owns the key bindings: WASD, Space/Left Ctrl, Left Shift, F3.</summary>
 public static class RaylibInput
 {
     /// <summary>Samples the current input. Call once per frame on the window's thread.</summary>
@@ -22,7 +22,8 @@ public static class RaylibInput
         return new InputState(
             move,
             Raylib_cs.Raylib.GetMouseDelta(),
-            Raylib_cs.Raylib.IsKeyDown(KeyboardKey.LeftShift));
+            Raylib_cs.Raylib.IsKeyDown(KeyboardKey.LeftShift),
+            Raylib_cs.Raylib.IsKeyPressed(KeyboardKey.F3));
     }
 
     private static float Axis(KeyboardKey positive, KeyboardKey negative)

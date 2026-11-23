@@ -15,7 +15,7 @@ Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download).
 dotnet run --project src/Nerdcraft.Desktop
 ```
 
-WASD move, Space/Left Ctrl up/down, Shift sprint, mouse look, Esc quit.
+WASD move, Space/Left Ctrl up/down, Shift sprint, mouse look, F3 debug overlay, Esc quit.
 
 ## License
 
