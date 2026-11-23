@@ -19,6 +19,19 @@ public class VoxelWorldTests
     }
 
     [Fact]
+    public void LoadChunk_BlocksWithOneSolid_ChunkIsNotEmpty()
+    {
+        BlockId[] blocks = new BlockId[Chunk.Volume];
+        blocks[Chunk.Index(3, 3, 3)] = BlockTypes.Stone;
+        VoxelWorld world = new();
+
+        world.LoadChunk(new ChunkPosition(0, 0, 0), blocks);
+
+        Assert.True(world.TryGetChunk(new ChunkPosition(0, 0, 0), out Chunk chunk));
+        Assert.False(chunk.IsEmpty);
+    }
+
+    [Fact]
     public void GetBlock_InMissingChunk_ReturnsAir()
     {
         VoxelWorld world = new();

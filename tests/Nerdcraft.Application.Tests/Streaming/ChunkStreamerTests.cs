@@ -59,6 +59,69 @@ public class ChunkStreamerTests
     }
 
     [Fact]
+    public void Update_EmptyChunks_RequestNoMesh()
+    {
+        // Two chunk rows: row 0 holds the slab, row 1 is all air. Five columns means five meshes, not ten.
+        GameSettings settings = _settings with { Bounds = new WorldBounds(0, (2 * Chunk.Size) - 1) };
+        InlineChunkWorkQueue queue = new(new HalfSlabGenerator(), new CulledChunkMesher());
+        ChunkStreamer streamer = new(_world, queue, settings);
+
+        for (int frame = 0; frame < 4; frame++)
+        {
+            streamer.Update(Camera);
+            streamer.UploadCompleted(_renderer);
+        }
+
+        Assert.True(_world.IsLoaded(new ChunkPosition(0, 1, 0)));
+        Assert.Equal(ChunksInWorld, queue.MeshRequests);
+    }
+
+    [Fact]
+    public void UploadCompleted_BlockPlacedInEmptyChunk_UploadsItsMesh()
+    {
+        GameSettings settings = _settings with { Bounds = new WorldBounds(0, (2 * Chunk.Size) - 1) };
+        ChunkStreamer streamer = new(_world, new InlineChunkWorkQueue(new HalfSlabGenerator(), new CulledChunkMesher()), settings);
+        for (int frame = 0; frame < 4; frame++)
+        {
+            streamer.Update(Camera);
+            streamer.UploadCompleted(_renderer);
+        }
+
+        Assert.Equal(ChunksInWorld, _renderer.Uploads.Count);
+
+        _world.SetBlock(new BlockPosition(8, Chunk.Size + 8, 8), BlockTypes.Stone); // Inside the empty chunk (0,1,0).
+        for (int frame = 0; frame < 4; frame++)
+        {
+            streamer.Update(Camera);
+            streamer.UploadCompleted(_renderer);
+        }
+
+        Assert.Equal(ChunksInWorld + 1, _renderer.Uploads.Count);
+    }
+
+    [Fact]
+    public void UploadCompleted_ChunkEmptiedAfterUpload_ReleasesItsMesh()
+    {
+        Settle();
+        MeshHandle original = _renderer.Uploads[0]; // Nearest chunk (0,0,0) uploads first.
+
+        for (int y = 0; y < Chunk.Size / 2; y++)
+        {
+            for (int z = 0; z < Chunk.Size; z++)
+            {
+                for (int x = 0; x < Chunk.Size; x++)
+                {
+                    _world.SetBlock(new BlockPosition(x, y, z), BlockTypes.Air);
+                }
+            }
+        }
+
+        Settle();
+
+        Assert.Contains(original, _renderer.Releases);
+    }
+
+    [Fact]
     public void UploadCompleted_AfterSettling_UploadsEachChunkMeshOnce()
     {
         Settle();

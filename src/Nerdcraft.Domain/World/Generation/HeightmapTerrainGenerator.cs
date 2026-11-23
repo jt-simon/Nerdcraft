@@ -14,12 +14,21 @@ public sealed class HeightmapTerrainGenerator : ITerrainGenerator
 {
     private const int DirtDepth = 3;
 
+    // Terrain height constants, shared by SurfaceHeight and the upper bound used to skip empty chunks.
+    private const float ContinentAmplitude = 16f;
+    private const float ContinentOffset = -4f;
+    private const float PlainsRelief = 6f;
+    private const float MountainRelief = 90f;
+
     private const int ContinentSeedOffset = 101;
     private const int MountainSeedOffset = 202;
     private const int HillSeedOffset = 303;
 
     private readonly int _seed;
     private readonly WorldBounds _bounds;
+
+    // Highest block Y any column can reach, assuming full-range noise; chunks above it are all air.
+    private readonly int _maxSurface;
 
     /// <summary>Creates a generator for one world.</summary>
     /// <param name="seed">Seed for the noise; different seeds give different terrain.</param>
@@ -30,6 +39,9 @@ public sealed class HeightmapTerrainGenerator : ITerrainGenerator
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(bounds.MaxY, bounds.MinY);
         _seed = seed;
         _bounds = bounds;
+        _maxSurface = Math.Min(
+            (int)MathF.Ceiling(ContinentOffset + ContinentAmplitude + PlainsRelief + MountainRelief),
+            bounds.MaxY);
     }
 
     /// <inheritdoc/>
@@ -37,6 +49,10 @@ public sealed class HeightmapTerrainGenerator : ITerrainGenerator
     {
         BlockPosition origin = position.Origin;
         blocks.Clear();
+        if (origin.Y > _maxSurface)
+        {
+            return;
+        }
 
         for (int z = 0; z < Chunk.Size; z++)
         {
@@ -74,7 +90,7 @@ public sealed class HeightmapTerrainGenerator : ITerrainGenerator
         // The noise only reaches about +/-0.7, so every range below is narrower than the full scale suggests.
         // Continent: base height from about -15 (basins) to +7, before relief is added.
         float continent = SimplexNoise.Fbm(_seed + ContinentSeedOffset, worldX / 1000f, worldZ / 1000f, 3);
-        float baseHeight = (continent * 16f) - 4f;
+        float baseHeight = (continent * ContinentAmplitude) + ContinentOffset;
 
         // Mountain mask: 0 on plains, 1 in mountain ranges.
         float rawMask = (SimplexNoise.Fbm(_seed + MountainSeedOffset, worldX / 800f, worldZ / 800f, 2) + 1f) * 0.5f;
@@ -82,7 +98,7 @@ public sealed class HeightmapTerrainGenerator : ITerrainGenerator
 
         float hills = SimplexNoise.Fbm(_seed + HillSeedOffset, worldX / 300f, worldZ / 300f, 3);
         // Relief is added on top of the base: up to about +/-4 on plains and +/-65 in mountain ranges.
-        float relief = hills * (6f + (mask * 90f));
+        float relief = hills * (PlainsRelief + (mask * MountainRelief));
 
         int height = (int)MathF.Floor(baseHeight + relief);
         return Math.Clamp(height, _bounds.MinY + 1, _bounds.MaxY);

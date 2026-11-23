@@ -8,6 +8,11 @@ contain breaking changes.
 
 ## [Unreleased]
 
+### Changed
+
+- Chunks with no solid blocks are no longer meshed, and terrain generation skips noise sampling for chunks above the highest possible surface.
+- `Chunk.IsEmpty` reports whether a chunk holds only air.
+
 ### Added
 
 - Procedural terrain from layered simplex noise (continents, mountain ranges and hills) around sea level at Y = 0.

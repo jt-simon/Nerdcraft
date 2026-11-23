@@ -24,8 +24,12 @@ public sealed class InlineChunkWorkQueue(ITerrainGenerator generator, IChunkMesh
         return true;
     }
 
+    /// <summary>Number of mesh requests accepted so far.</summary>
+    public int MeshRequests { get; private set; }
+
     public bool TryRequestMesh(ChunkSnapshot snapshot)
     {
+        MeshRequests++;
         _meshed.Enqueue(new MeshedChunk(snapshot.Position, snapshot.Version, mesher.Mesh(snapshot)));
         snapshot.Dispose();
         return true;
