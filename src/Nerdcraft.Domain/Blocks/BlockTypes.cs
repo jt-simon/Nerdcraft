@@ -19,4 +19,16 @@ public static class BlockTypes
 
     /// <summary>Indestructible floor that fills the bottom layer of the world.</summary>
     public static readonly BlockId Bedrock = new(4);
+
+    /// <summary>Loose grains found on beaches and on shallow seabeds.</summary>
+    public static readonly BlockId Sand = new(5);
+
+    /// <summary>Coarse stones that cover the deep seabed.</summary>
+    public static readonly BlockId Gravel = new(6);
+
+    /// <summary>Settled snow that caps the highest peaks.</summary>
+    public static readonly BlockId Snow = new(7);
+
+    /// <summary>Water that fills the terrain below sea level; the only translucent block.</summary>
+    public static readonly BlockId Water = new(8);
 }

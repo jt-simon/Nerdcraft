@@ -22,6 +22,11 @@ Nerdcraft.Desktop            composition root (the only place a renderer meets t
 Math uses `System.Numerics`. The core produces plain `MeshData` (positions, normals, colors, indices) and
 its own `Color`, so no engine types leak inward.
 
+Each chunk meshes to a `ChunkMesh`: an opaque `MeshData` and a translucent one (water). `ChunkStreamer.Draw`
+submits every opaque mesh first with `IRenderer.DrawMesh`, then the translucent meshes from farthest to
+nearest with `IRenderer.DrawTranslucentMesh`, which blends and does not write depth. Which blocks are
+translucent is a presentation choice, so it lives in `BlockPalette`, not in the domain.
+
 ## Threading model (target: 60 FPS on old CPUs and integrated GPUs)
 
 - **The main thread owns the GPU.** Every `IRenderer` call happens inside `NerdcraftGame.Render`, on the

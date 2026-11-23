@@ -9,10 +9,13 @@ using Nerdcraft.Domain.World;
 namespace Nerdcraft.Application.Meshing;
 
 /// <summary>
-/// Emits one quad per solid-block face whose neighbor is air. Vertices are chunk-local (0..16), so the
-/// renderer positions the chunk with a translation and large world coordinates stay precise.
-/// Ambient occlusion is baked into the vertex colors: each vertex is darkened by how many solid blocks
-/// crowd its corner, which makes individual blocks and creases visible.
+/// Emits one quad per block face that can be seen, into an opaque mesh or, for translucent blocks such as water,
+/// a translucent mesh. An opaque block shows a face toward air or a translucent neighbor; a translucent block
+/// shows a face only toward air, so there are no faces inside a body of water or between water and rock.
+/// Vertices are chunk-local (0..16), so the renderer positions the chunk with a translation and large world
+/// coordinates stay precise. Ambient occlusion is baked into the vertex colors: each vertex is darkened by how
+/// many opaque blocks crowd its corner, which makes individual blocks and creases visible. Translucent blocks
+/// do not occlude.
 /// </summary>
 public sealed class CulledChunkMesher : IChunkMesher
 {
@@ -34,11 +37,12 @@ public sealed class CulledChunkMesher : IChunkMesher
     ];
 
     /// <inheritdoc/>
-    /// <remarks>Stops adding faces, returning a partial mesh, if the 16-bit index limit would be exceeded.</remarks>
-    public MeshData Mesh(ChunkSnapshot snapshot)
+    /// <remarks>Stops adding faces, returning partial meshes, if the 16-bit index limit of either mesh would be exceeded.</remarks>
+    public ChunkMesh Mesh(ChunkSnapshot snapshot)
     {
         ReadOnlySpan<BlockId> blocks = snapshot.Blocks;
-        using MeshBuilder builder = new();
+        using MeshBuilder opaque = new();
+        using MeshBuilder translucent = new();
         Span<int> ao = stackalloc int[4];
 
         for (int y = 0; y < Chunk.Size; y++)
@@ -54,9 +58,12 @@ public sealed class CulledChunkMesher : IChunkMesher
                     }
 
                     Color color = BlockPalette.GetColor(block);
+                    bool isTranslucent = BlockPalette.IsTranslucent(block);
+                    MeshBuilder builder = isTranslucent ? translucent : opaque;
                     foreach (Face face in Faces)
                     {
-                        if (!blocks[ChunkSnapshot.Index(x + face.Dx, y + face.Dy, z + face.Dz)].IsAir)
+                        BlockId neighbor = blocks[ChunkSnapshot.Index(x + face.Dx, y + face.Dy, z + face.Dz)];
+                        if (!neighbor.IsAir && (isTranslucent || !BlockPalette.IsTranslucent(neighbor)))
                         {
                             continue;
                         }
@@ -68,14 +75,14 @@ public sealed class CulledChunkMesher : IChunkMesher
 
                         if (!builder.TryAddQuad(x, y, z, face, color, ao))
                         {
-                            return builder.Build();
+                            return new ChunkMesh(opaque.Build(), translucent.Build());
                         }
                     }
                 }
             }
         }
 
-        return builder.Build();
+        return new ChunkMesh(opaque.Build(), translucent.Build());
     }
 
     // Ambient occlusion for one corner of a face. In the layer just outside the face, the two blocks beside the
@@ -92,9 +99,9 @@ public sealed class CulledChunkMesher : IChunkMesher
         int bx = x + face.Dx;
         int by = y + face.Dy;
         int bz = z + face.Dz;
-        bool sideU = !blocks[ChunkSnapshot.Index(bx + ux, by + uy, bz + uz)].IsAir;
-        bool sideV = !blocks[ChunkSnapshot.Index(bx + vx, by + vy, bz + vz)].IsAir;
-        bool diagonal = !blocks[ChunkSnapshot.Index(bx + ux + vx, by + uy + vy, bz + uz + vz)].IsAir;
+        bool sideU = Occludes(blocks[ChunkSnapshot.Index(bx + ux, by + uy, bz + uz)]);
+        bool sideV = Occludes(blocks[ChunkSnapshot.Index(bx + vx, by + vy, bz + vz)]);
+        bool diagonal = Occludes(blocks[ChunkSnapshot.Index(bx + ux + vx, by + uy + vy, bz + uz + vz)]);
 
         if (sideU && sideV)
         {
@@ -103,6 +110,8 @@ public sealed class CulledChunkMesher : IChunkMesher
 
         return 3 - ((sideU ? 1 : 0) + (sideV ? 1 : 0) + (diagonal ? 1 : 0));
     }
+
+    private static bool Occludes(BlockId block) => !block.IsAir && !BlockPalette.IsTranslucent(block);
 
     private static (int X, int Y, int Z) AxisStep(int axis, int sign) => axis switch
     {

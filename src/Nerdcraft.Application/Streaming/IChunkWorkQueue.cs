@@ -12,11 +12,11 @@ namespace Nerdcraft.Application.Streaming;
 /// <param name="Blocks">Block data, indexed by <see cref="Chunk.Index"/>; may be longer than <see cref="Chunk.Volume"/>.</param>
 public readonly record struct GeneratedChunk(ChunkPosition Position, BlockId[] Blocks);
 
-/// <summary>A finished mesh for the chunk contents at <see cref="Version"/>.</summary>
+/// <summary>The finished meshes for the chunk contents at <see cref="Version"/>.</summary>
 /// <param name="Position">The meshed chunk.</param>
 /// <param name="Version">The <see cref="Chunk.Version"/> the mesh was built from.</param>
-/// <param name="Mesh">The mesh, in chunk-local coordinates; the caller disposes it.</param>
-public readonly record struct MeshedChunk(ChunkPosition Position, int Version, MeshData Mesh);
+/// <param name="Mesh">The opaque and translucent meshes, in chunk-local coordinates; the caller disposes it.</param>
+public readonly record struct MeshedChunk(ChunkPosition Position, int Version, ChunkMesh Mesh);
 
 /// <summary>
 /// Hands CPU-heavy chunk work to background workers. Every member is non-blocking and is called from the

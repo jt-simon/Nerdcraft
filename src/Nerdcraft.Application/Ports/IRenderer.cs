@@ -29,6 +29,15 @@ public interface IRenderer
     /// <param name="transform">Places the mesh's local coordinates in world space.</param>
     void DrawMesh(MeshHandle handle, Matrix4x4 transform);
 
+    /// <summary>
+    /// Draws an uploaded mesh with alpha blending and without writing depth, so what lies behind it shows through.
+    /// Valid only between <see cref="BeginFrame"/> and <see cref="EndFrame"/>, and only after every <see cref="DrawMesh"/>
+    /// call of the frame. The caller submits translucent meshes from farthest to nearest.
+    /// </summary>
+    /// <param name="handle">A handle from <see cref="UploadMesh"/>; vertex alpha sets the opacity.</param>
+    /// <param name="transform">Places the mesh's local coordinates in world space.</param>
+    void DrawTranslucentMesh(MeshHandle handle, Matrix4x4 transform);
+
     /// <summary>Finishes the frame and presents it.</summary>
     /// <param name="debugCameraPosition">
     /// When set, draws the debug overlay (FPS and this camera position); when <see langword="null"/>, draws no overlay.

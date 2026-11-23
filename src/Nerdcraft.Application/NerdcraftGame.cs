@@ -49,7 +49,7 @@ public sealed class NerdcraftGame : IAsyncDisposable
 
     /// <summary>
     /// Creates a game with the default wiring: heightmap terrain, culled meshing, and a threaded <see cref="ChunkPipeline"/>.
-    /// The camera starts 20 blocks above the terrain surface at X = 8, Z = 8.
+    /// The camera starts 20 blocks above the terrain surface, or above the sea if that is higher, at X = 8, Z = 8.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">A value in <paramref name="settings"/> is out of range.</exception>
     public static NerdcraftGame Create(GameSettings settings)
@@ -57,7 +57,7 @@ public sealed class NerdcraftGame : IAsyncDisposable
         settings.Validate();
         HeightmapTerrainGenerator generator = new(settings.Seed, settings.Bounds);
         ChunkPipeline pipeline = new(generator, new CulledChunkMesher(), settings.WorkerCount);
-        return new NerdcraftGame(settings, pipeline, new VoxelWorld(), generator.SurfaceHeight(8, 8) + SpawnClearance);
+        return new NerdcraftGame(settings, pipeline, new VoxelWorld(), Math.Max(generator.SurfaceHeight(8, 8), HeightmapTerrainGenerator.SeaLevel) + SpawnClearance);
     }
 
     /// <summary>Advances the camera by <paramref name="deltaSeconds"/> and requests any chunks it now needs. Does not touch the renderer.</summary>
@@ -83,7 +83,7 @@ public sealed class NerdcraftGame : IAsyncDisposable
         Frustum frustum = Frustum.FromViewProjection(view.CreateViewProjection(renderer.AspectRatio));
 
         renderer.BeginFrame(view, SkyColor);
-        _streamer.Draw(renderer, frustum);
+        _streamer.Draw(renderer, frustum, view.Position);
         renderer.EndFrame(_showDebug ? _camera.Position : null);
     }
 

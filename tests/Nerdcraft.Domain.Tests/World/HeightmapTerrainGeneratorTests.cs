@@ -70,31 +70,116 @@ public class HeightmapTerrainGeneratorTests
         BlockId[] blocks = new BlockId[Chunk.Volume];
         generator.Generate(top.ChunkPosition, blocks);
 
-        Assert.Equal(BlockTypes.Grass, blocks[Chunk.Index(top.LocalX, top.LocalY, top.LocalZ)]);
+        Assert.Equal(BlockTypes.Snow, blocks[Chunk.Index(top.LocalX, top.LocalY, top.LocalZ)]);
     }
 
     [Fact]
-    public void Generate_Column_HasGrassOverDirtOverStone()
+    public void Generate_GrassColumn_HasDirtBelowAndAirAbove()
     {
         HeightmapTerrainGenerator generator = new(7, WorldBounds.Default);
-        int surface = generator.SurfaceHeight(0, 0);
-        BlockId[] blocks = new BlockId[Chunk.Volume];
-        ChunkPosition chunk = new BlockPosition(0, surface, 0).ChunkPosition;
-        generator.Generate(chunk, blocks);
-        int baseY = chunk.Origin.Y;
-
-        BlockId At(int worldY) => blocks[Chunk.Index(0, worldY - baseY, 0)];
-
-        Assert.Equal(BlockTypes.Grass, At(surface));
-        if (surface - 1 >= baseY)
+        Dictionary<ChunkPosition, BlockId[]> cache = [];
+        (int X, int Z, int Surface)? found = null;
+        for (int i = 0; i < 400 && found is null; i++)
         {
-            Assert.Equal(BlockTypes.Dirt, At(surface - 1));
+            int surface = generator.SurfaceHeight(i * 5, 0);
+            if (BlockAt(generator, cache, new BlockPosition(i * 5, surface, 0)) == BlockTypes.Grass)
+            {
+                found = (i * 5, 0, surface);
+            }
         }
 
-        if (surface + 1 < baseY + Chunk.Size)
+        Assert.NotNull(found);
+        (int x, int z, int top) = found.Value;
+        Assert.Equal(BlockTypes.Air, BlockAt(generator, cache, new BlockPosition(x, top + 1, z)));
+        Assert.Equal(BlockTypes.Dirt, BlockAt(generator, cache, new BlockPosition(x, top - 1, z)));
+    }
+
+    [Fact]
+    public void Generate_ColumnBelowSeaLevel_HasWaterUpToSeaLevel()
+    {
+        HeightmapTerrainGenerator generator = new(7, WorldBounds.Default);
+        Dictionary<ChunkPosition, BlockId[]> cache = [];
+        int checkedColumns = 0;
+
+        for (int x = -600; x <= 600 && checkedColumns < 20; x += 7)
         {
-            Assert.Equal(BlockTypes.Air, At(surface + 1));
+            int surface = generator.SurfaceHeight(x, 0);
+            if (surface >= HeightmapTerrainGenerator.SeaLevel)
+            {
+                continue;
+            }
+
+            checkedColumns++;
+            for (int y = surface + 1; y <= HeightmapTerrainGenerator.SeaLevel; y++)
+            {
+                Assert.Equal(BlockTypes.Water, BlockAt(generator, cache, new BlockPosition(x, y, 0)));
+            }
+
+            Assert.Equal(BlockTypes.Air, BlockAt(generator, cache, new BlockPosition(x, HeightmapTerrainGenerator.SeaLevel + 1, 0)));
         }
+
+        Assert.Equal(20, checkedColumns);
+    }
+
+    [Fact]
+    public void Generate_SurfaceAcrossRegion_UsesEveryHeightMaterial()
+    {
+        HeightmapTerrainGenerator generator = new(1337, WorldBounds.Default);
+        Dictionary<ChunkPosition, BlockId[]> cache = [];
+        HashSet<BlockId> tops = [];
+        int highestSand = int.MinValue;
+        int lowestSnow = int.MaxValue;
+
+        for (int z = -1500; z <= 1500; z += 19)
+        {
+            for (int x = -1500; x <= 1500; x += 19)
+            {
+                int surface = generator.SurfaceHeight(x, z);
+                BlockId top = BlockAt(generator, cache, new BlockPosition(x, surface, z));
+                tops.Add(top);
+                if (top == BlockTypes.Sand)
+                {
+                    highestSand = Math.Max(highestSand, surface);
+                }
+
+                if (top == BlockTypes.Snow)
+                {
+                    lowestSnow = Math.Min(lowestSnow, surface);
+                }
+            }
+        }
+
+        Assert.Contains(BlockTypes.Grass, tops);
+        Assert.Contains(BlockTypes.Sand, tops);
+        Assert.Contains(BlockTypes.Gravel, tops);
+        Assert.Contains(BlockTypes.Stone, tops);
+        Assert.Contains(BlockTypes.Snow, tops);
+        Assert.True(highestSand < lowestSnow, $"Sand reaches {highestSand} but snow starts at {lowestSnow}.");
+    }
+
+    [Fact]
+    public void Generate_SeabedBlocks_AreNeverOpenedByCaves()
+    {
+        HeightmapTerrainGenerator generator = new(1337, WorldBounds.Default);
+        Dictionary<ChunkPosition, BlockId[]> cache = [];
+        int seabedColumns = 0;
+
+        for (int z = -400; z < 400; z += 2)
+        {
+            for (int x = -400; x < 400; x += 2)
+            {
+                int surface = generator.SurfaceHeight(x, z);
+                if (surface >= HeightmapTerrainGenerator.SeaLevel)
+                {
+                    continue;
+                }
+
+                seabedColumns++;
+                Assert.False(BlockAt(generator, cache, new BlockPosition(x, surface, z)).IsAir, $"Seabed opened at {x}, {surface}, {z}.");
+            }
+        }
+
+        Assert.True(seabedColumns > 1000);
     }
 
     [Fact]
@@ -140,7 +225,7 @@ public class HeightmapTerrainGeneratorTests
     [Fact]
     public void Generate_FixedSeedRegion_MatchesRecordedHash()
     {
-        const ulong ExpectedRegionHash = 7417564496357569455UL;
+        const ulong ExpectedRegionHash = 789920328402091155UL;
         HeightmapTerrainGenerator generator = new(1337, WorldBounds.Default);
         ChunkPosition[] region =
         [
