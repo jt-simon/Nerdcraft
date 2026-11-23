@@ -41,6 +41,7 @@ contain breaking changes.
 - The chunk streamer skips its per-frame scan of every chunk in range unless the camera crossed a chunk border, the world changed, or a mesh request finished or was refused.
 - Meshing is about 20% faster: the ambient occlusion lookups for each face corner use precomputed offsets. The meshes are unchanged.
 - `RaylibRenderer` no longer uploads vertex normals, which the default material does not use, saving about 40% of each mesh's video memory and upload size.
+- Default `GameSettings.MaxUploadsPerFrame` is now 8 (was 4), which roughly halves the time to fill the view at the default render distance.
 
 ## [0.1.0] - 2026-11-22
 

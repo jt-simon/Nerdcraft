@@ -19,8 +19,8 @@ public sealed record GameSettings
     /// <summary>Background workers for generation and meshing. Capped so weak machines keep a core free. At least 1.</summary>
     public int WorkerCount { get; init; } = Math.Clamp(Environment.ProcessorCount - 1, 1, 4);
 
-    /// <summary>Completed meshes uploaded to the GPU per frame, to avoid hitches when many finish at once. At least 1.</summary>
-    public int MaxUploadsPerFrame { get; init; } = 4;
+    /// <summary>Completed meshes uploaded to the GPU per frame, to avoid hitches when many finish at once. At least 1. The initial fill at the default render distance takes about 6 s at 8 and about 11 s at 4; 16 held 60 FPS on a desktop GPU but leaves less margin on integrated graphics.</summary>
+    public int MaxUploadsPerFrame { get; init; } = 8;
 
     /// <summary>Seed for terrain generation; the same seed produces the same world.</summary>
     public int Seed { get; init; } = 1337;
