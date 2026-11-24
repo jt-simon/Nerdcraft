@@ -5,6 +5,7 @@ using System.Numerics;
 using Nerdcraft.Application.Ports;
 using Nerdcraft.Application.Rendering;
 using Nerdcraft.Application.Ui;
+using Nerdcraft.Domain.Physics;
 
 namespace Nerdcraft.Application.Tests.Support;
 
@@ -65,8 +66,17 @@ public sealed class FakeRenderer : IRenderer
         AllDraws.Add((handle, true));
     }
 
-    public void EndFrame(DebugOverlay? debug, PauseMenuView? menu)
+    /// <summary>Box passed to each <see cref="DrawBoxOutline"/>, in submission order.</summary>
+    public List<Aabb> Outlines { get; } = [];
+
+    /// <summary>Crosshair flag passed to each <see cref="EndFrame"/>.</summary>
+    public List<bool> Crosshairs { get; } = [];
+
+    public void DrawBoxOutline(Aabb box, Color color) => Outlines.Add(box);
+
+    public void EndFrame(bool crosshair, DebugOverlay? debug, PauseMenuView? menu)
     {
+        Crosshairs.Add(crosshair);
         DebugOverlays.Add(debug);
         Menus.Add(menu);
     }

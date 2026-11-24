@@ -10,6 +10,9 @@ contain breaking changes.
 
 ### Added
 
+- A crosshair, and an outline on the solid block the player is looking at within 5 blocks (`LocalPlayer.Target()`, `LocalPlayer.ReachBlocks`). Water is looked through, not targeted.
+- `VoxelRaycast` and `RaycastHit` (Domain), a block raycast that returns the hit block and the face it was entered through.
+- `IRenderer.DrawBoxOutline`.
 - Esc opens a pause menu with Resume and Quit buttons and releases the mouse; the player stands still while it is open. F11 toggles maximize.
 - `PauseMenu`, `PauseMenuView`, `MenuButton` and `UiRect` (Application), and `NerdcraftGame.IsPaused` / `ExitRequested`.
 - `InputState.TogglePause`, `Pointer`, `Click` and `ScreenSize`.
@@ -42,6 +45,7 @@ contain breaking changes.
 
 - Esc no longer quits the game directly; use the pause menu's Quit.
 - `IRenderer.EndFrame` now takes a `PauseMenuView?` to draw the pause menu.
+- `IRenderer.EndFrame` takes a leading `crosshair` flag. Custom renderers must draw a centered crosshair when it is set.
 - `ChunkPipeline`'s constructor takes the `WorldBounds`, which size its outstanding-generation limit.
 - World-owned chunks are exposed as read-only views. Block edits go through `VoxelWorld.SetBlock` so streaming sees every change.
 - Streaming bounds outstanding results and budgets individual mesh uploads, including water. Mixed chunks appear after both uploads are ready, and stale results and mesh releases are spread across frames.

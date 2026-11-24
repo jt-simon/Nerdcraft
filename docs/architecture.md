@@ -15,7 +15,7 @@ Nerdcraft.Desktop            composition root (the only place a renderer meets t
 ```
 
 - **Domain**: `VoxelWorld`, `Chunk`, `BlockId`, `WorldBounds`, `ITerrainGenerator`, and the player movement
-  rules (`PlayerMovement`, `VoxelCollision`). Pure C#, no I/O.
+  rules (`PlayerMovement`, `VoxelCollision`), and block targeting (`VoxelRaycast`). Pure C#, no I/O.
 - **Application**: `NerdcraftGame` (the host calls `Update` then `Render` each frame), `IRenderer` (the
   port every graphics backend implements), meshing, chunk streaming, `LocalPlayer`, `InputState`.
 - **Pause menu**: pause state, button layout (`PauseMenu`) and hit-testing live in Application; a renderer only draws the
@@ -32,6 +32,10 @@ hidden behind solid terrain are skipped; without a camera chunk it falls back to
 submits every visible opaque mesh first with `IRenderer.DrawMesh`, then the translucent meshes from farthest to
 nearest with `IRenderer.DrawTranslucentMesh`, which blends and does not write depth. Which blocks are
 translucent is a presentation choice, so it lives in `BlockPalette`, not in the domain.
+
+Targeting is decided in Application (`LocalPlayer.Target` casts from the eye through `VoxelRaycast`, skipping water, within
+5 blocks). The renderer only draws what it is handed: `IRenderer.DrawBoxOutline` for the targeted block and the
+`crosshair` flag of `EndFrame`.
 
 ## Player movement
 

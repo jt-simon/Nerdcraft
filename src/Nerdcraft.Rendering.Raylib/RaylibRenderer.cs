@@ -6,6 +6,7 @@ using System.Numerics;
 using Nerdcraft.Application.Ports;
 using Nerdcraft.Application.Rendering;
 using Nerdcraft.Application.Ui;
+using Nerdcraft.Domain.Physics;
 
 using Raylib_cs;
 
@@ -114,15 +115,34 @@ public sealed unsafe class RaylibRenderer : IRenderer, IDisposable
     }
 
     /// <inheritdoc/>
+    public void DrawBoxOutline(Aabb box, NerdcraftColor color)
+    {
+        EndTranslucentPass();
+        Vector3 size = box.Max - box.Min;
+        Raylib_cs.Raylib.DrawCubeWires(
+            box.Min + (size * 0.5f), size.X, size.Y, size.Z, new Color(color.R, color.G, color.B, color.A));
+    }
+
+    /// <inheritdoc/>
     /// <remarks>
-    /// Draws the FPS counter, camera position, chunks drawn / meshed and vertices drawn (in millions) when
+    /// Draws two short bars centered on the screen when <paramref name="crosshair"/> is set. Draws the FPS counter,
+    /// camera position, chunks drawn / meshed and vertices drawn (in millions) when
     /// <paramref name="debug"/> is set. When <paramref name="menu"/> is set, dims the frame and draws each button
     /// with its label centered.
     /// </remarks>
-    public void EndFrame(DebugOverlay? debug, PauseMenuView? menu)
+    public void EndFrame(bool crosshair, DebugOverlay? debug, PauseMenuView? menu)
     {
         EndTranslucentPass();
         Raylib_cs.Raylib.EndMode3D();
+        if (crosshair)
+        {
+            int centerX = Raylib_cs.Raylib.GetScreenWidth() / 2;
+            int centerY = Raylib_cs.Raylib.GetScreenHeight() / 2;
+            Color crosshairColor = new(255, 255, 255, 200);
+            Raylib_cs.Raylib.DrawRectangle(centerX - 1, centerY - 8, 2, 16, crosshairColor);
+            Raylib_cs.Raylib.DrawRectangle(centerX - 8, centerY - 1, 16, 2, crosshairColor);
+        }
+
         if (debug is { } overlay)
         {
             Vector3 position = overlay.CameraPosition;
