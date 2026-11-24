@@ -45,6 +45,7 @@ runs build, format check and tests, so all three must pass locally first.
 | Something the game needs from the outside world | A port interface in `Nerdcraft.Application` (like `IRenderer`, `IChunkWorkQueue`, `IChunkStore`), implemented in an adapter project |
 | Any call into raylib or another engine | `Nerdcraft.Rendering.*` only |
 | Any call into SQLite or a compression library, or any file format of a saved world | `Nerdcraft.Persistence.*` only |
+| A texture or other artwork | `assets/texturepacks/default/textures/<name>.png` (CC BY-SA 4.0), referenced by name in `BlockPalette` |
 | Object construction and wiring | `Desktop/Program.cs` or `NerdcraftGame.Create` only |
 | A test fake | `tests/Nerdcraft.Application.Tests/Support` |
 
@@ -114,6 +115,6 @@ this behavior? (3) is it uncovered today?
 `IRenderer` and fill `InputState` from that engine's input; add a host that calls `NerdcraftGame.Update`
 then `Render` each frame on the render thread. Domain and Application don't change.
 
-**Add a block type:** add it to `BlockTypes` (Domain), give it a color and a display name in `BlockPalette` (Application); without a
-name it shows no hotbar hover text. Change terrain generation only if the task says where the block should appear;
+**Add a block type:** add it to `BlockTypes` (Domain), give it a texture name and a display name in `BlockPalette` (Application), and add its
+PNG to the default texture pack; without a name it shows no hotbar hover text. Change terrain generation only if the task says where the block should appear;
 otherwise leave it out and say so in your summary. No new test is needed for the constant.

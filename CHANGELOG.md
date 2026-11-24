@@ -10,6 +10,9 @@ contain breaking changes.
 
 ### Added
 
+- Textured blocks. Every block face is drawn with a 16 by 16 texture from the new default texture pack in `assets/texturepacks/default` (grass has its own top, side and bottom), and the hotbar shows the block's texture instead of a flat color. A texture pack is a folder of `textures/<name>.png`; a missing or unreadable file shows as magenta and is reported on standard error. Lighting and ambient occlusion are unchanged.
+- `TextureAtlas`, `UvRect`, `BlockPalette.GetTexture`, `BlockPalette.TextureNames` and `BlockPalette.Atlas` (Application): texture names and the atlas layout shared by the mesher and the renderer. `MeshData.TexCoords`; `MeshData.CopyFrom` takes texture coordinates.
+- Licensing: artwork, textures, documentation and other non-code text are licensed under Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0), see `LICENSE-CC-BY-SA-4.0.txt`. Code stays AGPL-3.0-or-later.
 - The world is saved. Every generated chunk and every edit is stored in a SQLite database (WAL mode, one compressed row per chunk, keyed by dimension, X, Z and Y), so edits survive chunk unloading and restarts, and the same terrain and edits come back on the next launch. It lives in `~/.local/share/Nerdcraft/worlds/default/world.db` on Linux (`%LOCALAPPDATA%` on Windows) and keeps the seed and height range it was created with. Edited chunks are saved every 5 seconds (`GameSettings.AutosaveSeconds`), when they unload and on quit; after a crash at most the last few seconds are lost. The player's position and hotbar are not saved yet.
 - Automatic upkeep: a daily backup in `backups/` (newest three kept), an integrity check after an unclean shutdown, and trimming of the write-ahead log and free pages. A second copy of the game cannot open the same world.
 - Saving never slows the game down: edits are queued for a single writer, generated terrain waits for the disk when too much is queued (so memory stays bounded), a backup still running when you quit is abandoned after 2 seconds and retried next launch, and Ctrl+C in the terminal quits and saves like Esc > Quit does (or cancels the open if the world is still opening). If the game stops because of an error (for example an unreadable chunk), it prints a short message naming the problem, writes the details to `crash.log` in the world folder, saves what it can and exits with code 1. After a failed read the world is left marked unclean, so the next launch checks the database. New `Nerdcraft.Persistence` meter for the writer's queue depth, batch size and commit time.
@@ -55,6 +58,7 @@ contain breaking changes.
 
 ### Changed
 
+- `HotbarSlotView.Swatch` (a color) is now `Icon` (a texture name), `BlockPalette.GetColor` returns a tint (white, or white with alpha for water) instead of the block's color, and `RaylibRenderer` takes the texture pack folder in its constructor.
 - `HudView` has two new members, `HoverText` and `HoverOpacity`, and `Hud.Layout` takes optional hover arguments. Custom renderers must draw the hover text above the selected slot at that opacity.
 - `IRenderer.EndFrame` takes a `HudView?` instead of the `crosshair` flag; the crosshair is `HudView.Crosshair`. `LocalPlayer.ReachBlocks` now equals `BlockInteraction.ReachBlocks`.
 - Esc no longer quits the game directly; use the pause menu's Quit.

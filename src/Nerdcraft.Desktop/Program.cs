@@ -42,7 +42,7 @@ try
     int exitCode = Guard(() =>
     {
         using RaylibWindow window = new("Nerdcraft", 1280, 720);
-        using RaylibRenderer renderer = new();
+        using RaylibRenderer renderer = new(Path.Combine(AppContext.BaseDirectory, "assets", "texturepacks", "default"));
         while (!window.ShouldClose && !game.ExitRequested && !interrupt.IsCancellationRequested)
         {
             // Clamp so a hitch (window drag, debugger) doesn't fling the camera. HUD timers still get the uncapped frame time.

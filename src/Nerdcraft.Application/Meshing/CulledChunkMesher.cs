@@ -13,7 +13,8 @@ namespace Nerdcraft.Application.Meshing;
 /// a translucent mesh. An opaque block shows a face toward air or a translucent neighbor; a translucent block
 /// shows a face only toward air, so there are no faces inside a body of water or between water and rock.
 /// Vertices are chunk-local (0..16), so the renderer positions the chunk with a translation and large world
-/// coordinates stay precise. Ambient occlusion is baked into the vertex colors: each vertex is darkened by how
+/// coordinates stay precise. Each face carries UVs into the texture atlas of <see cref="BlockPalette.Atlas"/>, with the
+/// image's top edge toward +Y on side faces. Ambient occlusion is baked into the vertex colors: each vertex is darkened by how
 /// many opaque blocks crowd its corner, which makes individual blocks and creases visible. Translucent blocks
 /// do not occlude.
 /// </summary>
@@ -21,6 +22,9 @@ public sealed class CulledChunkMesher : IChunkMesher
 {
     // 16-bit indices cap a mesh at 65,536 vertices. A worst-case checkerboard chunk needs ~49,000.
     private const int MaxVertices = 65536;
+
+    // Fraction of a tile left unused along each edge, so rounding never samples the neighboring tile.
+    private const float TileInset = 0.002f;
 
     // Brightness by ambient occlusion level: 0 is a corner boxed in by two sides, 3 is fully open.
     private static readonly float[] AoBrightness = [0.55f, 0.7f, 0.85f, 1f];
@@ -61,7 +65,7 @@ public sealed class CulledChunkMesher : IChunkMesher
                             continue;
                         }
 
-                        Color color = BlockPalette.GetColor(block);
+                        Color tint = BlockPalette.GetColor(block);
                         bool isTranslucent = BlockPalette.IsTranslucent(block);
                         foreach (Face face in Faces)
                         {
@@ -76,10 +80,11 @@ public sealed class CulledChunkMesher : IChunkMesher
                                 ao[corner] = OcclusionLevel(blocks, index, face, corner);
                             }
 
+                            UvRect tile = BlockPalette.GetUv(block, face.Id);
                             MeshBuilder builder = isTranslucent
                                 ? (translucent ??= new MeshBuilder())
                                 : (opaque ??= new MeshBuilder());
-                            if (!builder.TryAddQuad(x, y, z, face, color, ao))
+                            if (!builder.TryAddQuad(x, y, z, face, tint, tile, ao))
                             {
                                 return new ChunkMesh(opaque?.Build() ?? MeshData.Empty, translucent?.Build() ?? MeshData.Empty, visibility);
                             }
@@ -126,6 +131,21 @@ public sealed class CulledChunkMesher : IChunkMesher
 
     private sealed record Face(int Dx, int Dy, int Dz, float Shade, int[] Corners)
     {
+        // Which of the six faces this is, to pick its texture.
+        public ChunkFace Id { get; } = (Dx, Dy, Dz) switch
+        {
+            (1, _, _) => ChunkFace.PositiveX,
+            (-1, _, _) => ChunkFace.NegativeX,
+            (_, 1, _) => ChunkFace.PositiveY,
+            (_, -1, _) => ChunkFace.NegativeY,
+            (_, _, 1) => ChunkFace.PositiveZ,
+            _ => ChunkFace.NegativeZ,
+        };
+
+        // Per corner, the position inside the face's tile: U to the right and V downward as seen from outside. On side faces
+        // V runs from the top edge (y = 1) down, so images are upright; the top and bottom faces use X and Z.
+        public float[] CornerUvs { get; } = BuildCornerUvs(Dx, Dy, Dz, Corners);
+
         // The two axes (0 = X, 1 = Y, 2 = Z) lying in the face's plane, used to find a corner's neighbors.
         public int UAxis => Dx != 0 ? 1 : 0;
 
@@ -137,6 +157,27 @@ public sealed class CulledChunkMesher : IChunkMesher
         // For each corner, the steps from a block to the three blocks that crowd it: beside it along U, beside it
         // along V, and the diagonal. Three entries per corner, in that order.
         public int[] OcclusionOffsets { get; } = BuildOcclusionOffsets(Dx, Dy, Dz, Corners);
+
+        private static float[] BuildCornerUvs(int dx, int dy, int dz, int[] corners)
+        {
+            float[] uvs = new float[8];
+            for (int corner = 0; corner < 4; corner++)
+            {
+                int x = corners[corner * 3];
+                int y = corners[(corner * 3) + 1];
+                int z = corners[(corner * 3) + 2];
+                (uvs[corner * 2], uvs[(corner * 2) + 1]) = (dx, dy, dz) switch
+                {
+                    (1, _, _) => (1 - z, 1 - y),
+                    (-1, _, _) => (z, 1 - y),
+                    (_, _, 1) => (x, 1 - y),
+                    (_, _, -1) => (1 - x, 1 - y),
+                    _ => (x, z),
+                };
+            }
+
+            return uvs;
+        }
 
         private static int Step(int dx, int dy, int dz) => ChunkSnapshot.Index(dx, dy, dz) - ChunkSnapshot.Index(0, 0, 0);
 
@@ -163,12 +204,13 @@ public sealed class CulledChunkMesher : IChunkMesher
     {
         private readonly float[] _positions = ArrayPool<float>.Shared.Rent(MaxVertices * 3);
         private readonly float[] _normals = ArrayPool<float>.Shared.Rent(MaxVertices * 3);
+        private readonly float[] _texCoords = ArrayPool<float>.Shared.Rent(MaxVertices * 2);
         private readonly byte[] _colors = ArrayPool<byte>.Shared.Rent(MaxVertices * 4);
         private readonly ushort[] _indices = ArrayPool<ushort>.Shared.Rent(MaxVertices / 4 * 6);
         private int _vertexCount;
         private int _indexCount;
 
-        public bool TryAddQuad(int x, int y, int z, Face face, Color color, ReadOnlySpan<int> ao)
+        public bool TryAddQuad(int x, int y, int z, Face face, Color tint, UvRect tile, ReadOnlySpan<int> ao)
         {
             if (_vertexCount + 4 > MaxVertices)
             {
@@ -178,9 +220,9 @@ public sealed class CulledChunkMesher : IChunkMesher
             for (int corner = 0; corner < 4; corner++)
             {
                 float shade = face.Shade * AoBrightness[ao[corner]];
-                byte r = (byte)(color.R * shade);
-                byte g = (byte)(color.G * shade);
-                byte b = (byte)(color.B * shade);
+                byte r = (byte)(tint.R * shade);
+                byte g = (byte)(tint.G * shade);
+                byte b = (byte)(tint.B * shade);
 
                 int p = (_vertexCount + corner) * 3;
                 _positions[p] = x + face.Corners[corner * 3];
@@ -190,11 +232,15 @@ public sealed class CulledChunkMesher : IChunkMesher
                 _normals[p + 1] = face.Dy;
                 _normals[p + 2] = face.Dz;
 
+                int t = (_vertexCount + corner) * 2;
+                _texCoords[t] = tile.U0 + ((tile.U1 - tile.U0) * Inset(face.CornerUvs[corner * 2]));
+                _texCoords[t + 1] = tile.V0 + ((tile.V1 - tile.V0) * Inset(face.CornerUvs[(corner * 2) + 1]));
+
                 int c = (_vertexCount + corner) * 4;
                 _colors[c] = r;
                 _colors[c + 1] = g;
                 _colors[c + 2] = b;
-                _colors[c + 3] = color.A;
+                _colors[c + 3] = tint.A;
             }
 
             // Split the quad along the diagonal whose corners are darker in total. Splitting along the other one
@@ -215,9 +261,12 @@ public sealed class CulledChunkMesher : IChunkMesher
             return true;
         }
 
+        private static float Inset(float unit) => TileInset + (unit * (1f - (2f * TileInset)));
+
         public MeshData Build() => MeshData.CopyFrom(
             _positions.AsSpan(0, _vertexCount * 3),
             _normals.AsSpan(0, _vertexCount * 3),
+            _texCoords.AsSpan(0, _vertexCount * 2),
             _colors.AsSpan(0, _vertexCount * 4),
             _indices.AsSpan(0, _indexCount));
 
@@ -225,6 +274,7 @@ public sealed class CulledChunkMesher : IChunkMesher
         {
             ArrayPool<float>.Shared.Return(_positions);
             ArrayPool<float>.Shared.Return(_normals);
+            ArrayPool<float>.Shared.Return(_texCoords);
             ArrayPool<byte>.Shared.Return(_colors);
             ArrayPool<ushort>.Shared.Return(_indices);
         }

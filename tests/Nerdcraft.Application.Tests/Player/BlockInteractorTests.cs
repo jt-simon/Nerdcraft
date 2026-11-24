@@ -4,6 +4,7 @@ using System.Numerics;
 
 using Nerdcraft.Application.Input;
 using Nerdcraft.Application.Player;
+using Nerdcraft.Application.Rendering;
 using Nerdcraft.Application.Tests.Support;
 using Nerdcraft.Application.Ui;
 using Nerdcraft.Domain.Blocks;
@@ -118,6 +119,18 @@ public class BlockInteractorTests
     }
 
     [Fact]
+    public void Layout_UnknownBlockInSlot_ShowsAnIconTheAtlasDrawsAsMissing()
+    {
+        Inventory inventory = new();
+        inventory.TryAdd(new BlockId(200));
+
+        HudView hud = Hud.Layout(new Vector2(800f, 600f), inventory, crosshair: false);
+
+        Assert.NotNull(hud.Hotbar[0].Icon);
+        Assert.Equal(0, BlockPalette.Atlas.IndexOf(hud.Hotbar[0].Icon));
+    }
+
+    [Fact]
     public void Update_PlaceLastBlockWhileHoverVisible_ShowsEmptySlotWithoutLabel()
     {
         (_, LocalPlayer player, BlockInteractor interactor) = Create();
@@ -132,7 +145,7 @@ public class BlockInteractorTests
         HudView hud = Hud.Layout(new Vector2(800f, 600f), interactor.Inventory, crosshair: true, interactor.HoverText, interactor.HoverTimer);
         Assert.True(interactor.HoverTimer > 0f);
         Assert.Null(hud.HoverText);
-        Assert.Null(hud.Hotbar[0].Swatch);
+        Assert.Null(hud.Hotbar[0].Icon);
         Assert.Equal(0, hud.Hotbar[0].Count);
     }
 }

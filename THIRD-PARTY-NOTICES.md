@@ -1,6 +1,6 @@
 # Third-party notices
 
-Nerdcraft is licensed under AGPL-3.0-or-later (see [LICENSE](LICENSE)). It includes the following third-party code, which keeps its own license.
+Nerdcraft's code is licensed under AGPL-3.0-or-later (see [LICENSE](LICENSE)). Its artwork, documentation and other non-code text are licensed under CC BY-SA 4.0 (see [LICENSE-CC-BY-SA-4.0.txt](LICENSE-CC-BY-SA-4.0.txt)). It includes the following third-party code, which keeps its own license.
 
 ## FastNoiseLite
 
