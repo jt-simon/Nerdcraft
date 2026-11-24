@@ -18,14 +18,75 @@ namespace Nerdcraft.Rendering.Raylib;
 /// <summary>Draws with raylib. Must be created and used on the thread that owns the window.</summary>
 public sealed unsafe class RaylibRenderer : IRenderer, IDisposable
 {
+    private const int TileSize = 16;
+
     private static readonly Meter Metrics = new("Nerdcraft.Raylib");
     private static readonly Histogram<long> UploadBytes = Metrics.CreateHistogram<long>(
-        "nerdcraft.mesh.upload.bytes", "By", "Vertex positions, colors and indices sent to the GPU; normals are not uploaded");
+        "nerdcraft.mesh.upload.bytes", "By", "Vertex positions, texture coordinates, colors and indices sent to the GPU; normals are not uploaded");
 
     private readonly Dictionary<int, Mesh> _meshes = [];
     private readonly Material _material = Raylib_cs.Raylib.LoadMaterialDefault();
+    private readonly TextureAtlas _atlas = BlockPalette.Atlas;
+    private readonly Texture2D _atlasTexture;
     private int _nextId;
     private bool _drawingTranslucent;
+
+    /// <summary>
+    /// Builds the texture atlas from a texture pack and makes every block mesh use it. For each name in <see cref="BlockPalette.Atlas"/>
+    /// it reads <c>textures/&lt;name&gt;.png</c> from <paramref name="texturePackDirectory"/>, scales it to 16 by 16 pixels if it has another
+    /// size, and places it in the tile the atlas assigns. A file that is missing or cannot be read leaves its tile magenta; so do unknown
+    /// names. Each such file is reported on standard error, and one message says so if the pack has no <c>textures</c> folder. Must be called on the thread that owns the window, after the window is created.
+    /// </summary>
+    /// <param name="texturePackDirectory">The folder of the pack: the one that contains <c>textures</c>.</param>
+    public RaylibRenderer(string texturePackDirectory)
+    {
+        if (!Directory.Exists(Path.Combine(texturePackDirectory, "textures")))
+        {
+            Console.Error.WriteLine($"Texture pack not found: no 'textures' folder in {texturePackDirectory}. Blocks will be magenta.");
+        }
+
+        Image atlas = Raylib_cs.Raylib.GenImageColor(TileSize, TileSize * _atlas.TileCount, new Color(255, 0, 255, 255));
+        for (int i = 0; i < _atlas.Names.Count; i++)
+        {
+            string path = Path.Combine(texturePackDirectory, "textures", _atlas.Names[i] + ".png");
+            if (!File.Exists(path))
+            {
+                if (Directory.Exists(Path.Combine(texturePackDirectory, "textures")))
+                {
+                    Console.Error.WriteLine($"Texture missing: {path}");
+                }
+
+                continue;
+            }
+
+            Image tile = Raylib_cs.Raylib.LoadImage(path);
+            if (!Raylib_cs.Raylib.IsImageValid(tile))
+            {
+                Console.Error.WriteLine($"Texture unreadable: {path}");
+                continue;
+            }
+
+            if (tile.Width != TileSize || tile.Height != TileSize)
+            {
+                Raylib_cs.Raylib.ImageResizeNN(ref tile, TileSize, TileSize);
+            }
+
+            Raylib_cs.Raylib.ImageDraw(
+                ref atlas,
+                tile,
+                new Rectangle(0, 0, TileSize, TileSize),
+                new Rectangle(0, (i + 1) * TileSize, TileSize, TileSize),
+                Color.White);
+            Raylib_cs.Raylib.UnloadImage(tile);
+        }
+
+        _atlasTexture = Raylib_cs.Raylib.LoadTextureFromImage(atlas);
+        Raylib_cs.Raylib.UnloadImage(atlas);
+
+        // Pixel-sharp, and no mipmaps, which would blend neighboring tiles of the strip.
+        Raylib_cs.Raylib.SetTextureFilter(_atlasTexture, TextureFilter.Point);
+        Raylib_cs.Raylib.SetMaterialTexture(ref _material, MaterialMapIndex.Albedo, _atlasTexture);
+    }
 
     /// <inheritdoc/>
     public float AspectRatio
@@ -33,7 +94,8 @@ public sealed unsafe class RaylibRenderer : IRenderer, IDisposable
 
     /// <inheritdoc/>
     /// <remarks>
-    /// Retains only the index data on the CPU after upload; the vertex data lives on the GPU. Normals are not uploaded:
+    /// Retains only the index data on the CPU after upload; the vertex data lives on the GPU. Texture coordinates address the atlas
+    /// of <see cref="BlockPalette.Atlas"/>; vertex colors tint the texture. Normals are not uploaded:
     /// the default material's shader does not read them, so they would only cost video memory and upload time.
     /// </remarks>
     public MeshHandle UploadMesh(MeshData data)
@@ -42,6 +104,7 @@ public sealed unsafe class RaylibRenderer : IRenderer, IDisposable
         mesh.VertexCount = data.VertexCount;
         mesh.TriangleCount = data.IndexCount / 3;
         mesh.Vertices = CopyToRaylibMemory(data.Positions);
+        mesh.TexCoords = CopyToRaylibMemory(data.TexCoords);
         mesh.Colors = CopyToRaylibMemory(data.Colors);
         mesh.Indices = CopyToRaylibMemory(data.Indices);
 
@@ -50,13 +113,15 @@ public sealed unsafe class RaylibRenderer : IRenderer, IDisposable
         // The GPU now holds the data; drop the large CPU copies (matters on integrated graphics).
         // Indices must stay: DrawMesh draws non-indexed when mesh.Indices is null. UnloadMesh frees them.
         Raylib_cs.Raylib.MemFree(mesh.Vertices);
+        Raylib_cs.Raylib.MemFree(mesh.TexCoords);
         Raylib_cs.Raylib.MemFree(mesh.Colors);
         mesh.Vertices = null;
+        mesh.TexCoords = null;
         mesh.Colors = null;
 
         int id = ++_nextId;
         _meshes[id] = mesh;
-        UploadBytes.Record(((long)data.VertexCount * ((3 * sizeof(float)) + 4)) + ((long)data.IndexCount * sizeof(ushort)));
+        UploadBytes.Record(((long)data.VertexCount * ((5 * sizeof(float)) + 4)) + ((long)data.IndexCount * sizeof(ushort)));
         return new MeshHandle(id);
     }
 
@@ -126,7 +191,7 @@ public sealed unsafe class RaylibRenderer : IRenderer, IDisposable
     /// <inheritdoc/>
     /// <remarks>
     /// Draws two short bars centered on the screen when the HUD's crosshair is set, then the hotbar: each slot a dark box with
-    /// a white border (thicker when selected), an inset swatch of the block's color and its count when above one. Draws the FPS counter,
+    /// a white border (thicker when selected), an inset picture of the block's texture and its count when above one. Draws the FPS counter,
     /// camera position, chunks drawn / meshed and vertices drawn (in millions) when
     /// <paramref name="debug"/> is set. When <paramref name="menu"/> is set, dims the frame and draws each button
     /// with its label centered.
@@ -171,7 +236,7 @@ public sealed unsafe class RaylibRenderer : IRenderer, IDisposable
         Raylib_cs.Raylib.EndDrawing();
     }
 
-    private static void DrawHud(HudView hud)
+    private void DrawHud(HudView hud)
     {
         if (hud.Crosshair)
         {
@@ -182,6 +247,7 @@ public sealed unsafe class RaylibRenderer : IRenderer, IDisposable
             Raylib_cs.Raylib.DrawRectangle(centerX - 8, centerY - 1, 16, 2, crosshairColor);
         }
 
+        TextureAtlas atlas = _atlas;
         foreach (HotbarSlotView slot in hud.Hotbar)
         {
             int x = (int)slot.Bounds.X;
@@ -189,9 +255,15 @@ public sealed unsafe class RaylibRenderer : IRenderer, IDisposable
             int width = (int)slot.Bounds.Width;
             int height = (int)slot.Bounds.Height;
             Raylib_cs.Raylib.DrawRectangle(x, y, width, height, new Color(0, 0, 0, 120));
-            if (slot.Swatch is { } swatch)
+            if (slot.Icon is { } icon)
             {
-                Raylib_cs.Raylib.DrawRectangle(x + 8, y + 8, width - 16, height - 16, new Color(swatch.R, swatch.G, swatch.B, (byte)255));
+                Raylib_cs.Raylib.DrawTexturePro(
+                    _atlasTexture,
+                    new Rectangle(0, atlas.IndexOf(icon) * TileSize, TileSize, TileSize),
+                    new Rectangle(x + 8, y + 8, width - 16, height - 16),
+                    Vector2.Zero,
+                    0f,
+                    Color.White);
             }
 
             Raylib_cs.Raylib.DrawRectangleLines(x, y, width, height, Color.White);
@@ -234,7 +306,7 @@ public sealed unsafe class RaylibRenderer : IRenderer, IDisposable
         Raylib_cs.Raylib.DrawText(text, x, y, FontSize, new Color((byte)255, (byte)255, (byte)255, alpha));
     }
 
-    /// <summary>Unloads every mesh that has not been released, and the shared material.</summary>
+    /// <summary>Unloads every mesh that has not been released, and the shared material together with the atlas texture it holds.</summary>
     public void Dispose()
     {
         foreach (Mesh mesh in _meshes.Values)

@@ -41,5 +41,7 @@ compare links, merges, then tags the merge commit with `git tag vX.Y.Z && git pu
 
 ## License
 
-By contributing you agree that your work is licensed under the
-[GNU Affero General Public License v3.0 or later](LICENSE).
+By contributing you agree that your code is licensed under the
+[GNU Affero General Public License v3.0 or later](LICENSE), and that your artwork (textures and other images),
+documentation and other non-code text are licensed under
+[Creative Commons Attribution-ShareAlike 4.0 International](LICENSE-CC-BY-SA-4.0.txt).

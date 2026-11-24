@@ -23,8 +23,16 @@ Nerdcraft.Desktop            composition root (the only place a renderer or a st
   `PauseMenuView` it is handed. The adapter owns window concerns: capturing the cursor and F11 maximize.
 - **Rendering.Raylib**: implements `IRenderer`, reads raylib input into `InputState`.
 
-Math uses `System.Numerics`. The core produces plain `MeshData` (positions, normals, colors, indices) and
+Math uses `System.Numerics`. The core produces plain `MeshData` (positions, normals, texture coordinates, colors, indices) and
 its own `Color`, so no engine types leak inward.
+
+Textures: blocks name their textures (`BlockPalette.GetTexture`, one name per face) and never point at files or atlas
+slots. `TextureAtlas` (Application) lays the names out as a vertical strip of square tiles, with slot 0 reserved for a
+magenta "missing" tile. The mesher writes UVs from that layout and the renderer builds the image from it, so they cannot
+disagree. A texture pack is a folder of `textures/<name>.png`; the default one is `assets/texturepacks/default`, copied next
+to the Desktop executable. The renderer reads the pack once at startup and draws a missing or unreadable file as magenta.
+Vertex colors only tint (white, with alpha for water) and carry the baked shade and ambient occlusion. Artwork is CC BY-SA 4.0;
+code is AGPL-3.0-or-later.
 
 Each chunk meshes to a `ChunkMesh`: an opaque `MeshData`, a translucent one (water), and a `ChunkVisibility`
 saying which pairs of the chunk's faces are joined by open space (computed on the worker, by flood fill).

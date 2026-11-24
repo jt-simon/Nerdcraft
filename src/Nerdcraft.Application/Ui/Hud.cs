@@ -2,6 +2,7 @@
 
 using System.Numerics;
 
+using Nerdcraft.Application.Meshing;
 using Nerdcraft.Application.Rendering;
 using Nerdcraft.Domain.Items;
 
@@ -9,10 +10,10 @@ namespace Nerdcraft.Application.Ui;
 
 /// <summary>One hotbar slot, ready to draw.</summary>
 /// <param name="Bounds">Where the slot sits, in window pixels.</param>
-/// <param name="Swatch">Color of the block held, or <see langword="null"/> when the slot is empty.</param>
+/// <param name="Icon">Name of the texture that depicts the block held (see <see cref="BlockPalette.Atlas"/>), or <see langword="null"/> when the slot is empty. A block with no texture gets a name the atlas does not know, which draws the magenta missing tile.</param>
 /// <param name="Count">Blocks in the slot; 0 when empty.</param>
 /// <param name="Selected">True for the slot the player will place from.</param>
-public readonly record struct HotbarSlotView(UiRect Bounds, Color? Swatch, int Count, bool Selected);
+public readonly record struct HotbarSlotView(UiRect Bounds, string? Icon, int Count, bool Selected);
 
 /// <summary>What a renderer draws for the heads-up display.</summary>
 /// <param name="Crosshair">True when a crosshair is drawn at the center of the screen.</param>
@@ -24,6 +25,7 @@ public readonly record struct HudView(bool Crosshair, IReadOnlyList<HotbarSlotVi
 /// <summary>Layout of the heads-up display. Pure arithmetic, so every renderer shows the same HUD.</summary>
 public static class Hud
 {
+    private const string MissingIcon = "missing";
     private const float SlotSize = 44f;
     private const float Gap = 4f;
     private const float BottomMargin = 12f;
@@ -75,7 +77,7 @@ public static class Hud
             UiRect bounds = new(left + (i * (SlotSize + Gap)), top, SlotSize, SlotSize);
             slots[i] = new HotbarSlotView(
                 bounds,
-                stack.IsEmpty ? null : BlockPalette.GetColor(stack.Block),
+                stack.IsEmpty ? null : BlockPalette.GetTexture(stack.Block, ChunkFace.PositiveZ) ?? MissingIcon,
                 stack.IsEmpty ? 0 : stack.Count,
                 i == inventory.SelectedSlot);
         }

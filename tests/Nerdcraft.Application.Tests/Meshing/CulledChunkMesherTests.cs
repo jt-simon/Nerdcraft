@@ -42,6 +42,42 @@ public class CulledChunkMesherTests
 
     private static int Red(MeshData mesh, int vertex) => mesh.Colors[vertex * 4];
 
+    private static float V(MeshData mesh, int vertex) => mesh.TexCoords[(vertex * 2) + 1];
+
+    // The atlas slot a vertex's V falls in.
+    private static int Slot(MeshData mesh, int vertex) => (int)(V(mesh, vertex) * BlockPalette.Atlas.TileCount);
+
+    [Fact]
+    public void Mesh_GrassBlock_UsesTopSideAndBottomTextures()
+    {
+        VoxelWorld world = TestWorlds.WithEmptyChunks(Origin);
+        world.SetBlock(new BlockPosition(5, 5, 5), BlockTypes.Grass);
+
+        using MeshData mesh = MeshChunk(world, Origin);
+
+        ReadOnlySpan<float> normals = mesh.Normals;
+        for (int v = 0; v < mesh.VertexCount; v++)
+        {
+            float ny = normals[(v * 3) + 1];
+            string expected = ny > 0 ? "grass_top" : ny < 0 ? "dirt" : "grass_side";
+            Assert.Equal(BlockPalette.Atlas.IndexOf(expected), Slot(mesh, v));
+        }
+    }
+
+    [Fact]
+    public void Mesh_SideFace_PutsTheTextureTopAtTheBlockTop()
+    {
+        VoxelWorld world = TestWorlds.WithEmptyChunks(Origin);
+        world.SetBlock(new BlockPosition(5, 5, 5), BlockTypes.Grass);
+
+        using MeshData mesh = MeshChunk(world, Origin);
+
+        // Image rows run downward, so the top of the block has the smaller V.
+        int top = FindVertex(mesh, new Vector3(6, 6, 5), Vector3.UnitX);
+        int bottom = FindVertex(mesh, new Vector3(6, 5, 5), Vector3.UnitX);
+        Assert.True(V(mesh, top) < V(mesh, bottom));
+    }
+
     private static bool SharesATriangle(MeshData mesh, int first, int second)
     {
         ReadOnlySpan<ushort> indices = mesh.Indices;

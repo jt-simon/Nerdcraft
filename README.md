@@ -22,7 +22,10 @@ Your world is saved automatically (every few seconds and on quit) in `~/.local/s
 
 ## License
 
-GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See [LICENSE](LICENSE).
+- Code: GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See [LICENSE](LICENSE).
+- Artwork (including the default texture pack in `assets/`), documentation and other non-code text: Creative Commons
+  Attribution-ShareAlike 4.0 International (CC BY-SA 4.0), (c) Nerdcraft contributors. See
+  [LICENSE-CC-BY-SA-4.0.txt](LICENSE-CC-BY-SA-4.0.txt). Code snippets in the documentation are also available under the AGPL.
 
 ## More
 
