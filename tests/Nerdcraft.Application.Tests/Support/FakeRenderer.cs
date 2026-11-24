@@ -74,9 +74,13 @@ public sealed class FakeRenderer : IRenderer
 
     public void DrawBoxOutline(Aabb box, Color color) => Outlines.Add(box);
 
-    public void EndFrame(bool crosshair, DebugOverlay? debug, PauseMenuView? menu)
+    /// <summary>HUD passed to each <see cref="EndFrame"/>; null when the HUD was hidden.</summary>
+    public List<HudView?> Huds { get; } = [];
+
+    public void EndFrame(HudView? hud, DebugOverlay? debug, PauseMenuView? menu)
     {
-        Crosshairs.Add(crosshair);
+        Huds.Add(hud);
+        Crosshairs.Add(hud?.Crosshair ?? false);
         DebugOverlays.Add(debug);
         Menus.Add(menu);
     }

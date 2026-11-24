@@ -37,6 +37,7 @@ public sealed class NerdcraftGame : IAsyncDisposable
 
     private readonly GameSettings _settings;
     private readonly LocalPlayer _player;
+    private readonly BlockInteractor _interactor;
     private readonly ChunkStreamer _streamer;
     private readonly IAsyncDisposable? _workQueue;
     private readonly float _farPlane;
@@ -60,6 +61,7 @@ public sealed class NerdcraftGame : IAsyncDisposable
         _streamer = new ChunkStreamer(world, workQueue, settings);
         _player = new LocalPlayer(
             PlayerState.Spawn(new Vector3(8.5f, spawnHeight, 8.5f)), world, settings.Bounds, new PlayerAbilities(CanFly: true, CanNoclip: true));
+        _interactor = new BlockInteractor(world);
         _farPlane = (settings.RenderDistance + 1) * Chunk.Size * 1.5f;
     }
 
@@ -86,7 +88,9 @@ public sealed class NerdcraftGame : IAsyncDisposable
     /// <param name="input">
     /// This frame's input. Toggles the debug overlay when <see cref="InputState.ToggleDebug"/> is set, and flight and noclip likewise.
     /// <see cref="InputState.TogglePause"/> opens or closes the pause menu; while it is open the player stands still, chunks keep
-    /// streaming, and a <see cref="InputState.Click"/> on a button acts on it. Look input is ignored on the frame the menu closes and the two after it,
+    /// streaming, and a <see cref="InputState.Click"/> on a button acts on it. Otherwise <see cref="InputState.Break"/> and
+    /// <see cref="InputState.Place"/> change the targeted block and the hotbar keys change the selected slot; a button held
+    /// when the menu closes does nothing until released. Look input is ignored on the frame the menu closes and the two after it,
     /// because the host re-captures the cursor then and the pointer jumps.
     /// </param>
     /// <param name="deltaSeconds">Time since the previous frame, in seconds.</param>
@@ -142,6 +146,7 @@ public sealed class NerdcraftGame : IAsyncDisposable
             }
 
             _player.Update(input, deltaSeconds);
+            _interactor.Update(input, deltaSeconds, _player);
         }
 
         _streamer.Update(_player.EyePosition);
@@ -170,7 +175,7 @@ public sealed class NerdcraftGame : IAsyncDisposable
         }
 
         renderer.EndFrame(
-            !IsPaused,
+            Hud.Layout(_screenSize, _interactor.Inventory, crosshair: !IsPaused),
             _showDebug ? new DebugOverlay(_player.EyePosition, stats) : null,
             IsPaused ? PauseMenu.Layout(_screenSize, _pointer) : null);
         StreamingMetrics.RecordElapsed(DrawTime, drawStarted);
@@ -183,6 +188,7 @@ public sealed class NerdcraftGame : IAsyncDisposable
         {
             _ignoreLookFrames = 3;
             _player.ClearPendingInput();
+            _interactor.ClearPendingInput();
         }
     }
 

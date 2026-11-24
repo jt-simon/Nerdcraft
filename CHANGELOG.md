@@ -10,6 +10,10 @@ contain breaking changes.
 
 ### Added
 
+- Block breaking and placing. Left button breaks the targeted block into a 9-slot hotbar; right button places the selected block against the targeted face; held buttons repeat every 0.25 s. Keys 1-9 and the mouse wheel select a slot. Bedrock cannot be broken, water is replaced when placed into, and a block cannot be placed in mid-air or inside the player. Breaking is instant, and a block broken with a full hotbar is lost. Edits are not kept when their chunk unloads: it regenerates from the seed.
+- A hotbar HUD (`Hud`, `HudView`, `HotbarSlotView`), drawn over the scene and kept visible while paused.
+- `BlockInteraction.Apply`, `BlockAction` and `BlockActionResult` (Domain): the break and place rules as a pure function over a serializable request, so a server can run them and say why it refused. `Inventory` and `ItemStack` (Domain), `BlockInteractor` (Application), `BlockTypes.IsBreakable` and `IsReplaceable`.
+- `InputState.Break`, `Place`, `SelectSlot` and `HotbarScroll`.
 - A crosshair, and an outline on the solid block the player is looking at within 5 blocks (`LocalPlayer.Target()`, `LocalPlayer.ReachBlocks`). Water is looked through, not targeted.
 - `VoxelRaycast` and `RaycastHit` (Domain), a block raycast that returns the hit block and the face it was entered through.
 - `IRenderer.DrawBoxOutline`.
@@ -43,6 +47,7 @@ contain breaking changes.
 
 ### Changed
 
+- `IRenderer.EndFrame` takes a `HudView?` instead of the `crosshair` flag; the crosshair is `HudView.Crosshair`. `LocalPlayer.ReachBlocks` now equals `BlockInteraction.ReachBlocks`.
 - Esc no longer quits the game directly; use the pause menu's Quit.
 - `IRenderer.EndFrame` now takes a `PauseMenuView?` to draw the pause menu.
 - `IRenderer.EndFrame` takes a leading `crosshair` flag. Custom renderers must draw a centered crosshair when it is set.

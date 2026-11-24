@@ -50,8 +50,10 @@ public interface IRenderer
     void DrawBoxOutline(Aabb box, Color color);
 
     /// <summary>Finishes the frame and presents it.</summary>
-    /// <param name="crosshair">
-    /// When true, draws a crosshair at the center of the screen, over the scene and under the overlay and the menu.
+    /// <param name="hud">
+    /// When set, draws the heads-up display over the scene and under the overlay and the menu: the crosshair at the center
+    /// of the screen when <see cref="HudView.Crosshair"/> is set, and each hotbar slot at its pixel bounds. When
+    /// <see langword="null"/>, draws no HUD.
     /// </param>
     /// <param name="debug">
     /// When set, draws the debug overlay (FPS, the camera position and the draw statistics); when
@@ -61,5 +63,5 @@ public interface IRenderer
     /// When set, draws the pause menu last, over the scene and the overlay: the scene dimmed and each button at its
     /// pixel bounds. When <see langword="null"/>, draws no menu.
     /// </param>
-    void EndFrame(bool crosshair, DebugOverlay? debug, PauseMenuView? menu);
+    void EndFrame(HudView? hud, DebugOverlay? debug, PauseMenuView? menu);
 }

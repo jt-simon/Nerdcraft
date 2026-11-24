@@ -35,7 +35,21 @@ translucent is a presentation choice, so it lives in `BlockPalette`, not in the 
 
 Targeting is decided in Application (`LocalPlayer.Target` casts from the eye through `VoxelRaycast`, skipping water, within
 5 blocks). The renderer only draws what it is handed: `IRenderer.DrawBoxOutline` for the targeted block and the
-`crosshair` flag of `EndFrame`.
+`HudView` (crosshair and hotbar) given to `EndFrame`.
+
+## Block interaction
+
+Breaking and placing follow the same shape as movement, so a server can reuse the rules. `BlockAction` is a small value
+(break or place, a block position, a hotbar slot) and `BlockInteraction.Apply` checks it against the world, an `Inventory`, the
+eye position (reach) and the boxes of entities a new block must not overlap. It checks everything before changing anything and
+returns a `BlockActionResult`, so a refusal carries its reason. Rules: bedrock, air and water cannot be broken; a block may
+replace air or water; it needs a solid neighbor; it cannot overlap an entity.
+
+`Inventory` (a 9-slot hotbar, stacks of 64) is per-player Domain state. `BlockInteractor` in Application owns the local
+player's inventory, reads `InputState`, builds the action from `LocalPlayer.Target()` and applies it; sending the action to a
+server instead would change only that spot. The hotbar is laid out by `Hud.Layout` (like `PauseMenu`) and a renderer draws the
+`HudView` it is handed. `VoxelWorld.SetBlock` marks the chunk and its neighbors dirty, so `ChunkStreamer` remeshes them.
+Edits are not stored apart from the chunk, so they are lost when the chunk unloads.
 
 ## Player movement
 

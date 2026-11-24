@@ -125,22 +125,19 @@ public sealed unsafe class RaylibRenderer : IRenderer, IDisposable
 
     /// <inheritdoc/>
     /// <remarks>
-    /// Draws two short bars centered on the screen when <paramref name="crosshair"/> is set. Draws the FPS counter,
+    /// Draws two short bars centered on the screen when the HUD's crosshair is set, then the hotbar: each slot a dark box with
+    /// a white border (thicker when selected), an inset swatch of the block's color and its count when above one. Draws the FPS counter,
     /// camera position, chunks drawn / meshed and vertices drawn (in millions) when
     /// <paramref name="debug"/> is set. When <paramref name="menu"/> is set, dims the frame and draws each button
     /// with its label centered.
     /// </remarks>
-    public void EndFrame(bool crosshair, DebugOverlay? debug, PauseMenuView? menu)
+    public void EndFrame(HudView? hud, DebugOverlay? debug, PauseMenuView? menu)
     {
         EndTranslucentPass();
         Raylib_cs.Raylib.EndMode3D();
-        if (crosshair)
+        if (hud is { } view)
         {
-            int centerX = Raylib_cs.Raylib.GetScreenWidth() / 2;
-            int centerY = Raylib_cs.Raylib.GetScreenHeight() / 2;
-            Color crosshairColor = new(255, 255, 255, 200);
-            Raylib_cs.Raylib.DrawRectangle(centerX - 1, centerY - 8, 2, 16, crosshairColor);
-            Raylib_cs.Raylib.DrawRectangle(centerX - 8, centerY - 1, 16, 2, crosshairColor);
+            DrawHud(view);
         }
 
         if (debug is { } overlay)
@@ -172,6 +169,44 @@ public sealed unsafe class RaylibRenderer : IRenderer, IDisposable
         }
 
         Raylib_cs.Raylib.EndDrawing();
+    }
+
+    private static void DrawHud(HudView hud)
+    {
+        if (hud.Crosshair)
+        {
+            int centerX = Raylib_cs.Raylib.GetScreenWidth() / 2;
+            int centerY = Raylib_cs.Raylib.GetScreenHeight() / 2;
+            Color crosshairColor = new(255, 255, 255, 200);
+            Raylib_cs.Raylib.DrawRectangle(centerX - 1, centerY - 8, 2, 16, crosshairColor);
+            Raylib_cs.Raylib.DrawRectangle(centerX - 8, centerY - 1, 16, 2, crosshairColor);
+        }
+
+        foreach (HotbarSlotView slot in hud.Hotbar)
+        {
+            int x = (int)slot.Bounds.X;
+            int y = (int)slot.Bounds.Y;
+            int width = (int)slot.Bounds.Width;
+            int height = (int)slot.Bounds.Height;
+            Raylib_cs.Raylib.DrawRectangle(x, y, width, height, new Color(0, 0, 0, 120));
+            if (slot.Swatch is { } swatch)
+            {
+                Raylib_cs.Raylib.DrawRectangle(x + 8, y + 8, width - 16, height - 16, new Color(swatch.R, swatch.G, swatch.B, (byte)255));
+            }
+
+            Raylib_cs.Raylib.DrawRectangleLines(x, y, width, height, Color.White);
+            if (slot.Selected)
+            {
+                Raylib_cs.Raylib.DrawRectangleLines(x - 1, y - 1, width + 2, height + 2, Color.White);
+                Raylib_cs.Raylib.DrawRectangleLines(x + 1, y + 1, width - 2, height - 2, Color.White);
+            }
+
+            if (slot.Count > 1)
+            {
+                string count = slot.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                Raylib_cs.Raylib.DrawText(count, x + width - Raylib_cs.Raylib.MeasureText(count, 20) - 3, y + height - 22, 20, Color.White);
+            }
+        }
     }
 
     /// <summary>Unloads every mesh that has not been released, and the shared material.</summary>
