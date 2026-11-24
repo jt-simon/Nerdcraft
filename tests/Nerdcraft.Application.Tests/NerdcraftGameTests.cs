@@ -7,6 +7,7 @@ using Nerdcraft.Application.Meshing;
 using Nerdcraft.Application.Rendering;
 using Nerdcraft.Application.Tests.Support;
 using Nerdcraft.Application.Ui;
+using Nerdcraft.Domain.Physics;
 using Nerdcraft.Domain.World;
 
 namespace Nerdcraft.Application.Tests;
@@ -15,6 +16,8 @@ public class NerdcraftGameTests
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(5);
     private static readonly InputState ToggleDebug = new(Vector2.Zero, Vector2.Zero, false, false, ToggleDebug: true);
+
+    private static readonly InputState LookDown = new(Vector2.Zero, new Vector2(0f, 600f), false, false);
 
     private static readonly Vector2 Screen = new(800f, 600f);
     private static readonly InputState TogglePause = new(Vector2.Zero, Vector2.Zero, false, false, TogglePause: true, ScreenSize: Screen);
@@ -167,6 +170,59 @@ public class NerdcraftGameTests
         game.Update(ClickOn(PauseMenu.QuitIndex), 0.016f);
 
         Assert.False(game.ExitRequested);
+    }
+
+    [Fact]
+    public void Render_PlayerLookingDownAtGround_OutlinesTopStoneBlockAndShowsCrosshair()
+    {
+        (NerdcraftGame game, FakeRenderer renderer) = CreateTargetingGame();
+
+        RenderFrames(game, renderer, LookDown);
+
+        Assert.True(renderer.Crosshairs[^1]);
+        Aabb outline = renderer.Outlines[^1];
+        Assert.Equal(7f, outline.Min.Y, 0.01f);
+        Assert.Equal(8f, outline.Max.Y, 0.01f);
+    }
+
+    [Fact]
+    public void Render_Paused_HidesOutlineAndCrosshair()
+    {
+        (NerdcraftGame game, FakeRenderer renderer) = CreateTargetingGame();
+        RenderFrames(game, renderer, LookDown);
+        Assert.NotEmpty(renderer.Outlines);
+        renderer.Outlines.Clear();
+
+        game.Update(TogglePause, 0f);
+        game.Render(renderer);
+
+        Assert.Empty(renderer.Outlines);
+        Assert.False(renderer.Crosshairs[^1]);
+    }
+
+    private static void RenderFrames(NerdcraftGame game, FakeRenderer renderer, InputState firstFrame)
+    {
+        game.Update(firstFrame, 0f);
+        for (int i = 0; i < 3; i++)
+        {
+            game.Render(renderer);
+            game.Update(default, 0f);
+        }
+
+        game.Render(renderer);
+    }
+
+    // The slab's stone top is at Y = 8; the eye is above it and looks about 60 degrees down, well inside reach.
+    private static (NerdcraftGame Game, FakeRenderer Renderer) CreateTargetingGame()
+    {
+        GameSettings settings = new()
+        {
+            RenderDistance = 1,
+            Bounds = new WorldBounds(0, Chunk.Size - 1),
+            MaxUploadsPerFrame = 100,
+        };
+        InlineChunkWorkQueue queue = new(new HalfSlabGenerator(), new CulledChunkMesher());
+        return (new NerdcraftGame(settings, queue, new VoxelWorld(), spawnHeight: 8f), new FakeRenderer());
     }
 
     private static InputState ClickOn(int buttonIndex)

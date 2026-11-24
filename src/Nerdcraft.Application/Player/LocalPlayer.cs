@@ -5,6 +5,7 @@ using System.Numerics;
 using Nerdcraft.Application.Input;
 using Nerdcraft.Application.Rendering;
 using Nerdcraft.Domain.Entities;
+using Nerdcraft.Domain.Physics;
 using Nerdcraft.Domain.World;
 
 namespace Nerdcraft.Application.Player;
@@ -18,6 +19,9 @@ public sealed class LocalPlayer
 {
     /// <summary>Largest allowed pitch in either direction, just short of straight up or down.</summary>
     public const float MaxPitchDegrees = 89f;
+
+    /// <summary>How far, in blocks, the player can target a block.</summary>
+    public const float ReachBlocks = 5f;
 
     private const float DegreesPerPixel = 0.1f;
     private const float DoubleTapSeconds = 0.3f;
@@ -151,6 +155,14 @@ public sealed class LocalPlayer
         Vector3 eye = EyePosition;
         return new CameraView(eye, eye + Forward, Vector3.UnitY, fovYDegrees, nearPlane, farPlane);
     }
+
+    /// <summary>
+    /// The solid block the player is looking at within <see cref="ReachBlocks"/>, or <see langword="null"/> when there is none.
+    /// Water is looked through, and the block the eye is in is ignored, so in noclip inside terrain the target is the block
+    /// ahead, not the one around the camera. The ray starts at the interpolated <see cref="EyePosition"/> along <see cref="Forward"/>,
+    /// so the result matches what <see cref="ToView"/> renders.
+    /// </summary>
+    public RaycastHit? Target() => VoxelRaycast.Cast(_world, EyePosition, Forward, ReachBlocks, ignoreStartBlock: true);
 
     private void Tick()
     {

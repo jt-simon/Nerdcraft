@@ -12,6 +12,7 @@ using Nerdcraft.Application.Rendering;
 using Nerdcraft.Application.Streaming;
 using Nerdcraft.Application.Ui;
 using Nerdcraft.Domain.Entities;
+using Nerdcraft.Domain.Physics;
 using Nerdcraft.Domain.World;
 using Nerdcraft.Domain.World.Generation;
 
@@ -29,6 +30,10 @@ public sealed class NerdcraftGame : IAsyncDisposable
     private static readonly Histogram<double> DrawTime = StreamingMetrics.Meter.CreateHistogram<double>("nerdcraft.draw.duration", "ms");
 
     private static readonly Color SkyColor = new(135, 190, 235);
+    private static readonly Color OutlineColor = new(0, 0, 0, 160);
+
+    // Grows the outline a little past the block so its lines do not fight the block's own faces for depth.
+    private const float OutlineMargin = 0.002f;
 
     private readonly GameSettings _settings;
     private readonly LocalPlayer _player;
@@ -157,7 +162,15 @@ public sealed class NerdcraftGame : IAsyncDisposable
 
         renderer.BeginFrame(view, SkyColor);
         DrawStats stats = _streamer.Draw(renderer, frustum, view.Position, countMeshedChunks: _showDebug);
+        if (!IsPaused && _player.Target() is { } hit)
+        {
+            Vector3 corner = new(hit.Block.X, hit.Block.Y, hit.Block.Z);
+            renderer.DrawBoxOutline(
+                new Aabb(corner - new Vector3(OutlineMargin), corner + Vector3.One + new Vector3(OutlineMargin)), OutlineColor);
+        }
+
         renderer.EndFrame(
+            !IsPaused,
             _showDebug ? new DebugOverlay(_player.EyePosition, stats) : null,
             IsPaused ? PauseMenu.Layout(_screenSize, _pointer) : null);
         StreamingMetrics.RecordElapsed(DrawTime, drawStarted);
