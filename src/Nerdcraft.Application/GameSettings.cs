@@ -43,6 +43,12 @@ public sealed record GameSettings
     /// <summary>Vertical field of view of the camera, in degrees. Greater than 0 and less than 180.</summary>
     public float FovYDegrees { get; init; } = 70f;
 
+    /// <summary>
+    /// Real seconds between saves of edited chunks to the chunk store, counted on the uncapped UI time so it also runs while
+    /// paused. Greater than 0. Has no effect without a store.
+    /// </summary>
+    public float AutosaveSeconds { get; init; } = 5f;
+
     internal void Validate()
     {
         ArgumentOutOfRangeException.ThrowIfNegative(RenderDistance);
@@ -51,6 +57,11 @@ public sealed record GameSettings
         ArgumentOutOfRangeException.ThrowIfLessThan(MaxUploadsPerFrame, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(MaxChunkInstallsPerFrame, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(MaxMeshRequestsPerFrame, 1);
+        if (!(AutosaveSeconds > 0f))
+        {
+            throw new ArgumentOutOfRangeException(nameof(AutosaveSeconds), AutosaveSeconds, "The autosave interval must be greater than 0.");
+        }
+
         if (!(FovYDegrees is > 0f and < 180f))
         {
             throw new ArgumentOutOfRangeException(nameof(FovYDegrees), FovYDegrees, "Field of view must be between 0 and 180 degrees, exclusive.");

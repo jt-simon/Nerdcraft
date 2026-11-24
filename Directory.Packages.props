@@ -5,8 +5,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.15" />
     <PackageVersion Include="Raylib-cs" Version="8.1.0" />
     <PackageVersion Include="xunit.v3.mtp-v2" Version="4.0.3" />
+    <PackageVersion Include="ZstdSharp.Port" Version="0.8.8" />
   </ItemGroup>
 
 </Project>

@@ -6,6 +6,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Nerdcraft.Application\Nerdcraft.Application.csproj" />
+    <ProjectReference Include="..\Nerdcraft.Persistence.Sqlite\Nerdcraft.Persistence.Sqlite.csproj" />
     <ProjectReference Include="..\Nerdcraft.Rendering.Raylib\Nerdcraft.Rendering.Raylib.csproj" />
   </ItemGroup>
 

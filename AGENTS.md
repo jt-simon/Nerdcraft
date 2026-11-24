@@ -6,9 +6,10 @@ swappable (raylib today). Read the **Hard rules** and **Before you finish** sect
 
 ## Hard rules
 
-1. **Dependencies point inward only:** Desktop -> Rendering.* -> Application -> Domain. Never add a
+1. **Dependencies point inward only:** Desktop -> Rendering.* and Persistence.* -> Application -> Domain. Never add a
    `ProjectReference` or package that breaks this. A test checks it.
-2. **Engine types stay in `Nerdcraft.Rendering.Raylib`.** No `using Raylib_cs` anywhere else. The core uses
+2. **Engine types stay in `Nerdcraft.Rendering.Raylib`, and database and compression types stay in
+   `Nerdcraft.Persistence.Sqlite`.** No `using Raylib_cs`, `Microsoft.Data.Sqlite` or `ZstdSharp` anywhere else. The core uses
    `System.Numerics`, `MeshData` and its own `Color`.
 3. **Domain is pure:** no I/O, `Task`/threads/`lock`, `DateTime.Now`, unseeded `Random`, or engine types.
 4. **Never weaken a check to make it pass.** Do not delete, skip or loosen a test (including
@@ -41,8 +42,9 @@ runs build, format check and tests, so all three must pass locally first.
 | You are adding... | It goes in |
 | --- | --- |
 | A game rule or world data (blocks, chunks, terrain) | `Nerdcraft.Domain` |
-| Something the game needs from the outside world | A port interface in `Nerdcraft.Application` (like `IRenderer`, `IChunkWorkQueue`), implemented in an adapter project |
+| Something the game needs from the outside world | A port interface in `Nerdcraft.Application` (like `IRenderer`, `IChunkWorkQueue`, `IChunkStore`), implemented in an adapter project |
 | Any call into raylib or another engine | `Nerdcraft.Rendering.*` only |
+| Any call into SQLite or a compression library, or any file format of a saved world | `Nerdcraft.Persistence.*` only |
 | Object construction and wiring | `Desktop/Program.cs` or `NerdcraftGame.Create` only |
 | A test fake | `tests/Nerdcraft.Application.Tests/Support` |
 
@@ -87,10 +89,11 @@ this behavior? (3) is it uncovered today?
 ## Stop and ask the user when
 
 - A change seems to need a new package, project or reference.
-- You would change a port interface (`IRenderer`, `IChunkWorkQueue`, `IChunkMesher`, `ITerrainGenerator`)
-  and the task did not clearly require it. If the task does require it, go ahead, but in the same change
-  update every implementation and fake (for `IRenderer`: `RaylibRenderer` and `FakeRenderer`), document the
-  new member's contract, and name the signature change in your final summary.
+- You would change a port interface (`IRenderer`, `IChunkWorkQueue`, `IChunkMesher`, `ITerrainGenerator`,
+  `IChunkStore`) and the task did not clearly require it. If the task does require it, go ahead, but in the same change
+  update every implementation and fake (for `IRenderer`: `RaylibRenderer` and `FakeRenderer`; for `IChunkStore`:
+  `SqliteChunkStore` and `InMemoryChunkStore`), document the new member's contract, and name the signature change in
+  your final summary.
 - You would edit `Directory.*.props`, `.editorconfig`, `global.json`, `.github/` or `AGENTS.md`.
 - You would bump `<Version>` in `Directory.Build.props` or create a git tag. Releases are the maintainer's job.
 - Any hard rule seems to block the task.

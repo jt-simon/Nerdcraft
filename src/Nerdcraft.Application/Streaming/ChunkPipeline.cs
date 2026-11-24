@@ -7,6 +7,7 @@ using System.Runtime.ExceptionServices;
 using System.Threading.Channels;
 
 using Nerdcraft.Application.Meshing;
+using Nerdcraft.Application.Ports;
 using Nerdcraft.Application.Rendering;
 using Nerdcraft.Domain.Blocks;
 using Nerdcraft.Domain.World;
@@ -30,6 +31,7 @@ public sealed class ChunkPipeline : IChunkWorkQueue, IAsyncDisposable
 
     private readonly ITerrainGenerator _generator;
     private readonly IChunkMesher _mesher;
+    private readonly IChunkStore? _store;
     private readonly Channel<ChunkJob> _requests;
     private readonly ResultQueue<GeneratedChunk> _generated = new("generation");
     private readonly ResultQueue<MeshedChunk> _meshed = new("mesh");
@@ -52,10 +54,15 @@ public sealed class ChunkPipeline : IChunkWorkQueue, IAsyncDisposable
     /// Maximum requests waiting for a worker. Together with the worker count it sets independent limits for outstanding
     /// meshes and generated rows. Further requests are refused until space frees up.
     /// </param>
-    public ChunkPipeline(ITerrainGenerator generator, IChunkMesher mesher, int workerCount, WorldBounds bounds, int queueCapacity = 32)
+    /// <param name="store">
+    /// Optional chunk storage, called from worker threads. A column request first reads stored chunks and generates only the
+    /// rows that are missing, saving them with <see cref="IChunkStore.SaveGeneratedAsync"/> before they are published.
+    /// </param>
+    public ChunkPipeline(ITerrainGenerator generator, IChunkMesher mesher, int workerCount, WorldBounds bounds, int queueCapacity = 32, IChunkStore? store = null)
     {
         _generator = generator;
         _mesher = mesher;
+        _store = store;
         _meshedCapacity = (long)queueCapacity + workerCount;
         _generatedCapacity = _meshedCapacity * (bounds.MaxChunkY - bounds.MinChunkY + 1);
         _requests = Channel.CreateBounded<ChunkJob>(new BoundedChannelOptions(queueCapacity)
@@ -169,7 +176,7 @@ public sealed class ChunkPipeline : IChunkWorkQueue, IAsyncDisposable
                     return;
                 }
 
-                Process(job, cancellationToken);
+                await ProcessAsync(job, cancellationToken);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -183,12 +190,11 @@ public sealed class ChunkPipeline : IChunkWorkQueue, IAsyncDisposable
         }
     }
 
-    private void Process(ChunkJob job, CancellationToken cancellationToken)
+    private ValueTask ProcessAsync(ChunkJob job, CancellationToken cancellationToken)
     {
         if (job.Snapshot is null)
         {
-            GenerateColumn(job, cancellationToken);
-            return;
+            return GenerateColumnAsync(job, cancellationToken);
         }
 
         try
@@ -201,17 +207,20 @@ public sealed class ChunkPipeline : IChunkWorkQueue, IAsyncDisposable
         {
             job.Snapshot.Dispose();
         }
+
+        return ValueTask.CompletedTask;
     }
 
-    // Generates the whole column into one scratch buffer, then hands each row back in its own pooled array.
-    private void GenerateColumn(ChunkJob job, CancellationToken cancellationToken)
+    // Fills the whole column into one scratch buffer (from the store where possible, otherwise generated), then hands each
+    // row back in its own pooled array.
+    private async ValueTask GenerateColumnAsync(ChunkJob job, CancellationToken cancellationToken)
     {
         int rows = job.MaxChunkY - job.Position.Y + 1;
         int length = rows * Chunk.Volume;
         BlockId[] scratch = ArrayPool<BlockId>.Shared.Rent(length);
         try
         {
-            _generator.GenerateColumn(job.Position.X, job.Position.Z, job.Position.Y, job.MaxChunkY, scratch.AsSpan(0, length));
+            await LoadOrGenerateColumnAsync(job, scratch, rows, cancellationToken);
             for (int row = 0; row < rows; row++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -226,6 +235,64 @@ public sealed class ChunkPipeline : IChunkWorkQueue, IAsyncDisposable
             ArrayPool<BlockId>.Shared.Return(scratch);
         }
     }
+
+    // Stored rows are read into the buffer, missing ones are generated and saved. The save waits when the store is behind.
+    private async ValueTask LoadOrGenerateColumnAsync(ChunkJob job, BlockId[] blocks, int rows, CancellationToken cancellationToken)
+    {
+        if (_store is null)
+        {
+            Generate(job, blocks, rows);
+            return;
+        }
+
+        bool[] stored = ArrayPool<bool>.Shared.Rent(rows);
+        BlockId[]? generated = null;
+        try
+        {
+            ReadStored(_store, job, blocks, stored, rows, cancellationToken);
+            int storedRows = CountStored(stored, rows);
+            if (storedRows == rows)
+            {
+                return;
+            }
+
+            // Generate straight into the buffer when nothing was stored; otherwise beside it, so stored rows are not overwritten.
+            generated = storedRows == 0 ? blocks : ArrayPool<BlockId>.Shared.Rent(rows * Chunk.Volume);
+            Generate(job, generated, rows);
+            for (int row = 0; row < rows; row++)
+            {
+                if (stored[row])
+                {
+                    continue;
+                }
+
+                if (!ReferenceEquals(generated, blocks))
+                {
+                    Array.Copy(generated, row * Chunk.Volume, blocks, row * Chunk.Volume, Chunk.Volume);
+                }
+
+                await _store.SaveGeneratedAsync(
+                    job.Position with { Y = job.Position.Y + row }, blocks.AsMemory(row * Chunk.Volume, Chunk.Volume), cancellationToken);
+            }
+        }
+        finally
+        {
+            ArrayPool<bool>.Shared.Return(stored);
+            if (generated is not null && !ReferenceEquals(generated, blocks))
+            {
+                ArrayPool<BlockId>.Shared.Return(generated);
+            }
+        }
+    }
+
+    private void Generate(ChunkJob job, BlockId[] target, int rows)
+        => _generator.GenerateColumn(job.Position.X, job.Position.Z, job.Position.Y, job.MaxChunkY, target.AsSpan(0, rows * Chunk.Volume));
+
+    private static void ReadStored(IChunkStore store, ChunkJob job, BlockId[] blocks, bool[] stored, int rows, CancellationToken cancellationToken)
+        => store.ReadColumn(
+            job.Position.X, job.Position.Z, job.Position.Y, job.MaxChunkY, blocks.AsSpan(0, rows * Chunk.Volume), stored.AsSpan(0, rows), cancellationToken);
+
+    private static int CountStored(bool[] stored, int rows) => stored.AsSpan(0, rows).Count(true);
 
     private void ThrowIfFaulted() => Volatile.Read(ref _fault)?.Throw();
 

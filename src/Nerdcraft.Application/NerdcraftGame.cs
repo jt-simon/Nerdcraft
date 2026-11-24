@@ -46,19 +46,24 @@ public sealed class NerdcraftGame : IAsyncDisposable
     private Vector2 _screenSize;
     private Vector2 _pointer;
     private long _previousFrame;
+    private float _secondsSinceSave;
 
     /// <summary>Creates a game over the supplied work queue and world. If <paramref name="workQueue"/> is <see cref="IAsyncDisposable"/>, this game disposes it.</summary>
     /// <param name="settings">Configuration for streaming and the camera.</param>
     /// <param name="workQueue">Background worker port used for terrain generation and meshing.</param>
     /// <param name="world">The world to populate and draw.</param>
     /// <param name="spawnHeight">World Y of the player's feet at the start, above the block column at X = 8, Z = 8. Must clear the terrain there; the player holds still until the chunk under them has loaded, then falls.</param>
+    /// <param name="store">
+    /// Optional chunk storage. Edited chunks are saved to it every <see cref="GameSettings.AutosaveSeconds"/>, when they unload, and on
+    /// <see cref="DisposeAsync"/>. The caller owns the store and disposes it after this game; it should be the same store the work queue reads.
+    /// </param>
     /// <exception cref="ArgumentOutOfRangeException">A value in <paramref name="settings"/> is out of range.</exception>
-    public NerdcraftGame(GameSettings settings, IChunkWorkQueue workQueue, VoxelWorld world, float spawnHeight = 56f)
+    public NerdcraftGame(GameSettings settings, IChunkWorkQueue workQueue, VoxelWorld world, float spawnHeight = 56f, IChunkStore? store = null)
     {
         settings.Validate();
         _settings = settings;
         _workQueue = workQueue as IAsyncDisposable;
-        _streamer = new ChunkStreamer(world, workQueue, settings);
+        _streamer = new ChunkStreamer(world, workQueue, settings, store);
         _player = new LocalPlayer(
             PlayerState.Spawn(new Vector3(8.5f, spawnHeight, 8.5f)), world, settings.Bounds, new PlayerAbilities(CanFly: true, CanNoclip: true));
         _interactor = new BlockInteractor(world);
@@ -69,13 +74,15 @@ public sealed class NerdcraftGame : IAsyncDisposable
     /// Creates a game with the default wiring: heightmap terrain, culled meshing, and a threaded <see cref="ChunkPipeline"/>.
     /// The player starts standing on the terrain surface, or on the sea if that is higher, at X = 8, Z = 8.
     /// </summary>
+    /// <param name="settings">Configuration for streaming and the camera.</param>
+    /// <param name="store">Optional chunk storage to load chunks from and save them to; the caller owns it and disposes it after the game.</param>
     /// <exception cref="ArgumentOutOfRangeException">A value in <paramref name="settings"/> is out of range.</exception>
-    public static NerdcraftGame Create(GameSettings settings)
+    public static NerdcraftGame Create(GameSettings settings, IChunkStore? store = null)
     {
         settings.Validate();
         HeightmapTerrainGenerator generator = new(settings.Seed, settings.Bounds);
-        ChunkPipeline pipeline = new(generator, new CulledChunkMesher(), settings.WorkerCount, settings.Bounds);
-        return new NerdcraftGame(settings, pipeline, new VoxelWorld(), Math.Max(generator.SurfaceHeight(8, 8), HeightmapTerrainGenerator.SeaLevel) + 1);
+        ChunkPipeline pipeline = new(generator, new CulledChunkMesher(), settings.WorkerCount, settings.Bounds, store: store);
+        return new NerdcraftGame(settings, pipeline, new VoxelWorld(), Math.Max(generator.SurfaceHeight(8, 8), HeightmapTerrainGenerator.SeaLevel) + 1, store);
     }
 
     /// <summary>True while the pause menu is open. The host should release the cursor then, and capture it otherwise.</summary>
@@ -93,7 +100,10 @@ public sealed class NerdcraftGame : IAsyncDisposable
     /// <param name="deltaSeconds">Time since the previous frame, in seconds.</param>
     public void Update(InputState input, float deltaSeconds) => Update(input, deltaSeconds, deltaSeconds);
 
-    /// <summary>Advances the player by <paramref name="deltaSeconds"/> and requests any chunks they now need. Does not touch the renderer.</summary>
+    /// <summary>
+    /// Advances the player by <paramref name="deltaSeconds"/> and requests any chunks they now need. Every <see cref="GameSettings.AutosaveSeconds"/>
+    /// of real time it also saves edited chunks to the chunk store, if there is one. Does not touch the renderer.
+    /// </summary>
     /// <param name="input">
     /// This frame's input. Toggles the debug overlay when <see cref="InputState.ToggleDebug"/> is set, and flight and noclip likewise.
     /// <see cref="InputState.TogglePause"/> opens or closes the pause menu; while it is open the player stands still, chunks keep
@@ -104,9 +114,11 @@ public sealed class NerdcraftGame : IAsyncDisposable
     /// </param>
     /// <param name="deltaSeconds">Simulation time since the previous frame, in seconds. The host may clamp it so a hitch does not fling the camera.</param>
     /// <param name="uiDeltaSeconds">
-    /// Real time since the previous frame, in seconds, before any clamp. Drives HUD timers such as the hotbar hover text, so they keep
-    /// real time while paused or when <paramref name="deltaSeconds"/> is clamped.
+    /// Real time since the previous frame, in seconds, before any clamp. Drives HUD timers such as the hotbar hover text and the
+    /// autosave interval, so they keep real time while paused or when <paramref name="deltaSeconds"/> is clamped. A host that always
+    /// passes 0 never autosaves.
     /// </param>
+    /// <exception cref="Exception">Rethrows a failure of the chunk store (for example a full disk) when saving or unloading chunks.</exception>
     public void Update(InputState input, float deltaSeconds, float uiDeltaSeconds)
     {
         long started = StreamingMetrics.Start(UpdateTime);
@@ -166,6 +178,15 @@ public sealed class NerdcraftGame : IAsyncDisposable
         }
 
         _streamer.Update(_player.EyePosition);
+
+        // Real time, so edits are saved while paused and a long frame does not skip a save.
+        _secondsSinceSave += uiDeltaSeconds;
+        if (_secondsSinceSave >= _settings.AutosaveSeconds)
+        {
+            _secondsSinceSave = 0f;
+            _streamer.SaveModified();
+        }
+
         StreamingMetrics.RecordElapsed(UpdateTime, started);
     }
 
@@ -209,12 +230,25 @@ public sealed class NerdcraftGame : IAsyncDisposable
     }
 
     /// <summary>
-    /// Discards any staged CPU mesh, stops background workers and waits for them to finish. Call when frames have
-    /// stopped. The renderer's owner is responsible for releasing its remaining GPU resources.
+    /// Saves edited chunks to the store, discards any staged CPU mesh, stops background workers and waits for them to finish.
+    /// Call when frames have stopped. The renderer's owner is responsible for releasing its remaining GPU resources, and the
+    /// store's owner for disposing the store afterwards.
     /// </summary>
-    public ValueTask DisposeAsync()
+    /// <exception cref="Exception">Rethrows a failure of the chunk store while saving, after the workers have stopped.</exception>
+    public async ValueTask DisposeAsync()
     {
-        _streamer.DiscardStagedMesh();
-        return _workQueue?.DisposeAsync() ?? ValueTask.CompletedTask;
+        try
+        {
+            _streamer.SaveModified();
+        }
+        finally
+        {
+            // Workers stop even when the store failed; the store's exception is still thrown to the caller.
+            _streamer.DiscardStagedMesh();
+            if (_workQueue is not null)
+            {
+                await _workQueue.DisposeAsync();
+            }
+        }
     }
 }
