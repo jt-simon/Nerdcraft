@@ -21,7 +21,7 @@ public sealed class LocalPlayer
     public const float MaxPitchDegrees = 89f;
 
     /// <summary>How far, in blocks, the player can target a block.</summary>
-    public const float ReachBlocks = 5f;
+    public const float ReachBlocks = BlockInteraction.ReachBlocks;
 
     private const float DegreesPerPixel = 0.1f;
     private const float DoubleTapSeconds = 0.3f;

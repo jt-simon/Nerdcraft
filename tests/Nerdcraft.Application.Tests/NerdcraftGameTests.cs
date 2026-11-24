@@ -7,6 +7,7 @@ using Nerdcraft.Application.Meshing;
 using Nerdcraft.Application.Rendering;
 using Nerdcraft.Application.Tests.Support;
 using Nerdcraft.Application.Ui;
+using Nerdcraft.Domain.Blocks;
 using Nerdcraft.Domain.Physics;
 using Nerdcraft.Domain.World;
 
@@ -198,6 +199,26 @@ public class NerdcraftGameTests
 
         Assert.Empty(renderer.Outlines);
         Assert.False(renderer.Crosshairs[^1]);
+    }
+
+    [Fact]
+    public void Update_ResumeClickStillHeld_DoesNotBreakBlock()
+    {
+        VoxelWorld world = new();
+        GameSettings settings = new() { RenderDistance = 1, Bounds = new WorldBounds(0, Chunk.Size - 1), MaxUploadsPerFrame = 100 };
+        NerdcraftGame game = new(settings, new InlineChunkWorkQueue(new HalfSlabGenerator(), new CulledChunkMesher()), world, spawnHeight: 8f);
+        FakeRenderer renderer = new();
+        RenderFrames(game, renderer, LookDown);
+        Vector3 min = renderer.Outlines[^1].Min;
+        BlockPosition target = new((int)MathF.Round(min.X), (int)MathF.Round(min.Y), (int)MathF.Round(min.Z));
+        Assert.Equal(BlockTypes.Stone, world.GetBlock(target));
+
+        game.Update(TogglePause, 0.016f);
+        game.Update(ClickOn(PauseMenu.ResumeIndex) with { Break = true }, 0.016f);
+        game.Update(new InputState(Vector2.Zero, Vector2.Zero, false, false, Break: true, ScreenSize: Screen), 0.016f);
+
+        Assert.False(game.IsPaused);
+        Assert.Equal(BlockTypes.Stone, world.GetBlock(target));
     }
 
     private static void RenderFrames(NerdcraftGame game, FakeRenderer renderer, InputState firstFrame)

@@ -8,7 +8,7 @@ using Raylib_cs;
 
 namespace Nerdcraft.Rendering.Raylib;
 
-/// <summary>Reads raylib keyboard and mouse state into an <see cref="InputState"/>. Owns the key bindings: WASD move, Space jump, Left Shift sneak, F toggle flight, N toggle noclip, F3 debug overlay, Esc pause menu (mouse picks its buttons). F11 maximize is handled by <see cref="RaylibWindow"/>.</summary>
+/// <summary>Reads raylib keyboard and mouse state into an <see cref="InputState"/>. Owns the key bindings: WASD move, Space jump, Left Shift sneak, F toggle flight, N toggle noclip, left button break, right button place, 1-9 and wheel select hotbar slot, F3 debug overlay, Esc pause menu (mouse picks its buttons). F11 maximize is handled by <see cref="RaylibWindow"/>.</summary>
 public static class RaylibInput
 {
     /// <summary>Samples the current input. Call once per frame on the window's thread.</summary>
@@ -30,7 +30,24 @@ public static class RaylibInput
             // While the cursor is captured raylib reports a virtual position; park it off-screen so no button looks hovered.
             Raylib_cs.Raylib.IsCursorHidden() ? new Vector2(-1f, -1f) : Raylib_cs.Raylib.GetMousePosition(),
             Raylib_cs.Raylib.IsMouseButtonPressed(MouseButton.Left),
-            new Vector2(Raylib_cs.Raylib.GetScreenWidth(), Raylib_cs.Raylib.GetScreenHeight()));
+            new Vector2(Raylib_cs.Raylib.GetScreenWidth(), Raylib_cs.Raylib.GetScreenHeight()),
+            Raylib_cs.Raylib.IsMouseButtonDown(MouseButton.Left),
+            Raylib_cs.Raylib.IsMouseButtonDown(MouseButton.Right),
+            SlotKey(),
+            -Math.Sign(Raylib_cs.Raylib.GetMouseWheelMove()));
+    }
+
+    private static int? SlotKey()
+    {
+        for (int i = 0; i < 9; i++)
+        {
+            if (Raylib_cs.Raylib.IsKeyPressed(KeyboardKey.One + i))
+            {
+                return i;
+            }
+        }
+
+        return null;
     }
 
     private static float Axis(KeyboardKey positive, KeyboardKey negative)

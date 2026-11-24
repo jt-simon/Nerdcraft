@@ -37,4 +37,10 @@ public static class BlockTypes
 
     /// <summary>True when <paramref name="block"/> is a liquid an entity can swim in; currently only <see cref="Water"/>.</summary>
     public static bool IsLiquid(BlockId block) => block == Water;
+
+    /// <summary>True when a player can break <paramref name="block"/>: every solid block except <see cref="Bedrock"/>.</summary>
+    public static bool IsBreakable(BlockId block) => IsSolid(block) && block != Bedrock;
+
+    /// <summary>True when a placed block may take the place of <paramref name="block"/>: air and liquids.</summary>
+    public static bool IsReplaceable(BlockId block) => block.IsAir || IsLiquid(block);
 }
