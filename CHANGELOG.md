@@ -10,6 +10,9 @@ contain breaking changes.
 
 ### Added
 
+- Hotbar hover text: when the selected slot changes (keys 1–9 or mouse wheel), the block's name appears above the slot for 3 seconds, fading out over the last second. Empty slots show no text.
+- `BlockPalette.GetDisplayName` maps block types to display names for the hover text.
+- `NerdcraftGame.Update(input, deltaSeconds, uiDeltaSeconds)`: HUD timers run on the uncapped frame time, so they keep running while paused or when the host clamps the simulation step. The two-argument overload uses one delta for both. `Hud.ComputeHoverOpacity` and `Hud.HoverDuration` compute the fade.
 - Block breaking and placing. Left button breaks the targeted block into a 9-slot hotbar; right button places the selected block against the targeted face; held buttons repeat every 0.25 s. Keys 1-9 and the mouse wheel select a slot. Bedrock cannot be broken, water is replaced when placed into, and a block cannot be placed in mid-air or inside the player. Breaking is instant, and a block broken with a full hotbar is lost. Edits are not kept when their chunk unloads: it regenerates from the seed.
 - A hotbar HUD (`Hud`, `HudView`, `HotbarSlotView`), drawn over the scene and kept visible while paused.
 - `BlockInteraction.Apply`, `BlockAction` and `BlockActionResult` (Domain): the break and place rules as a pure function over a serializable request, so a server can run them and say why it refused. `Inventory` and `ItemStack` (Domain), `BlockInteractor` (Application), `BlockTypes.IsBreakable` and `IsReplaceable`.
@@ -47,6 +50,7 @@ contain breaking changes.
 
 ### Changed
 
+- `HudView` has two new members, `HoverText` and `HoverOpacity`, and `Hud.Layout` takes optional hover arguments. Custom renderers must draw the hover text above the selected slot at that opacity.
 - `IRenderer.EndFrame` takes a `HudView?` instead of the `crosshair` flag; the crosshair is `HudView.Crosshair`. `LocalPlayer.ReachBlocks` now equals `BlockInteraction.ReachBlocks`.
 - Esc no longer quits the game directly; use the pause menu's Quit.
 - `IRenderer.EndFrame` now takes a `PauseMenuView?` to draw the pause menu.

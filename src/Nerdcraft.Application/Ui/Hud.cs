@@ -17,7 +17,9 @@ public readonly record struct HotbarSlotView(UiRect Bounds, Color? Swatch, int C
 /// <summary>What a renderer draws for the heads-up display.</summary>
 /// <param name="Crosshair">True when a crosshair is drawn at the center of the screen.</param>
 /// <param name="Hotbar">The hotbar slots, left to right.</param>
-public readonly record struct HudView(bool Crosshair, IReadOnlyList<HotbarSlotView> Hotbar);
+/// <param name="HoverText">Text to show above the selected slot, or <see langword="null"/> for none. Always <see langword="null"/> when <paramref name="HoverOpacity"/> is 0.</param>
+/// <param name="HoverOpacity">Opacity for the hover text in [0, 1]; 0 means hidden. Always 0 when <paramref name="HoverText"/> is <see langword="null"/>.</param>
+public readonly record struct HudView(bool Crosshair, IReadOnlyList<HotbarSlotView> Hotbar, string? HoverText, float HoverOpacity);
 
 /// <summary>Layout of the heads-up display. Pure arithmetic, so every renderer shows the same HUD.</summary>
 public static class Hud
@@ -26,11 +28,39 @@ public static class Hud
     private const float Gap = 4f;
     private const float BottomMargin = 12f;
 
+    /// <summary>Total time the hover text stays visible.</summary>
+    public const float HoverDuration = 3f;
+
+    /// <summary>Time during which the hover text stays at full opacity before fading.</summary>
+    public const float HoverFullOpacityDuration = 2f;
+
+    /// <summary>Computes the hover text opacity from the remaining timer.</summary>
+    /// <param name="timer">Seconds remaining.</param>
+    /// <returns>Opacity in [0, 1]; full for the first <see cref="HoverFullOpacityDuration"/> seconds, then linear fade over the last second.</returns>
+    public static float ComputeHoverOpacity(float timer)
+    {
+        if (timer <= 0f)
+        {
+            return 0f;
+        }
+
+        float fadeDuration = HoverDuration - HoverFullOpacityDuration; // 1f
+        if (timer > fadeDuration)
+        {
+            return 1f; // Full opacity for the first HoverFullOpacityDuration seconds
+        }
+
+        // Linear fade over the last fadeDuration seconds
+        return timer / fadeDuration;
+    }
+
     /// <summary>Lays the hotbar out centered along the bottom of the window.</summary>
     /// <param name="screenSize">Window size in pixels. Hosts must supply it; a zero size puts the hotbar off-screen.</param>
     /// <param name="inventory">The inventory to show.</param>
     /// <param name="crosshair">Whether the crosshair is drawn.</param>
-    public static HudView Layout(Vector2 screenSize, Inventory inventory, bool crosshair)
+    /// <param name="hoverText">Text to show above the selected slot, or <see langword="null"/> for none.</param>
+    /// <param name="hoverTimer">Seconds remaining for the hover text; controls fade-out.</param>
+    public static HudView Layout(Vector2 screenSize, Inventory inventory, bool crosshair, string? hoverText = null, float hoverTimer = 0f)
     {
         float totalWidth = (Inventory.SlotCount * SlotSize) + ((Inventory.SlotCount - 1) * Gap);
 
@@ -50,6 +80,7 @@ public static class Hud
                 i == inventory.SelectedSlot);
         }
 
-        return new HudView(crosshair, slots);
+        float hoverOpacity = hoverText is null ? 0f : ComputeHoverOpacity(hoverTimer);
+        return new HudView(crosshair, slots, hoverOpacity > 0f ? hoverText : null, hoverOpacity);
     }
 }

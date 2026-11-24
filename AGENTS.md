@@ -111,6 +111,6 @@ this behavior? (3) is it uncovered today?
 `IRenderer` and fill `InputState` from that engine's input; add a host that calls `NerdcraftGame.Update`
 then `Render` each frame on the render thread. Domain and Application don't change.
 
-**Add a block type:** add it to `BlockTypes` (Domain), give it a color in `BlockPalette` (Application). Change terrain
-generation only if the task says where the block should appear; otherwise leave it out and say so in your
-summary. No new test is needed for the constant.
+**Add a block type:** add it to `BlockTypes` (Domain), give it a color and a display name in `BlockPalette` (Application); without a
+name it shows no hotbar hover text. Change terrain generation only if the task says where the block should appear;
+otherwise leave it out and say so in your summary. No new test is needed for the constant.

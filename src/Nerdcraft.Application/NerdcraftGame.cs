@@ -19,7 +19,7 @@ using Nerdcraft.Domain.World.Generation;
 namespace Nerdcraft.Application;
 
 /// <summary>
-/// The game as seen by a host. The host owns the main loop and calls <see cref="Update"/> then
+/// The game as seen by a host. The host owns the main loop and calls <see cref="Update(InputState, float, float)"/> then
 /// <see cref="Render"/> once per frame, on the thread that owns the graphics context.
 /// </summary>
 public sealed class NerdcraftGame : IAsyncDisposable
@@ -84,6 +84,15 @@ public sealed class NerdcraftGame : IAsyncDisposable
     /// <summary>True once the player chose Quit in the pause menu. The host should then stop its loop.</summary>
     public bool ExitRequested { get; private set; }
 
+    /// <summary>
+    /// Advances the player by <paramref name="deltaSeconds"/> and requests any chunks they now need. Does not touch the renderer.
+    /// Uses <paramref name="deltaSeconds"/> for HUD timers too; a host that clamps the simulation step must call the overload
+    /// that also takes the uncapped elapsed time.
+    /// </summary>
+    /// <param name="input">This frame's input. See the three-argument overload for how each field is used.</param>
+    /// <param name="deltaSeconds">Time since the previous frame, in seconds.</param>
+    public void Update(InputState input, float deltaSeconds) => Update(input, deltaSeconds, deltaSeconds);
+
     /// <summary>Advances the player by <paramref name="deltaSeconds"/> and requests any chunks they now need. Does not touch the renderer.</summary>
     /// <param name="input">
     /// This frame's input. Toggles the debug overlay when <see cref="InputState.ToggleDebug"/> is set, and flight and noclip likewise.
@@ -93,8 +102,12 @@ public sealed class NerdcraftGame : IAsyncDisposable
     /// when the menu closes does nothing until released. Look input is ignored on the frame the menu closes and the two after it,
     /// because the host re-captures the cursor then and the pointer jumps.
     /// </param>
-    /// <param name="deltaSeconds">Time since the previous frame, in seconds.</param>
-    public void Update(InputState input, float deltaSeconds)
+    /// <param name="deltaSeconds">Simulation time since the previous frame, in seconds. The host may clamp it so a hitch does not fling the camera.</param>
+    /// <param name="uiDeltaSeconds">
+    /// Real time since the previous frame, in seconds, before any clamp. Drives HUD timers such as the hotbar hover text, so they keep
+    /// real time while paused or when <paramref name="deltaSeconds"/> is clamped.
+    /// </param>
+    public void Update(InputState input, float deltaSeconds, float uiDeltaSeconds)
     {
         long started = StreamingMetrics.Start(UpdateTime);
         if (FrameTime.Enabled)
@@ -119,6 +132,9 @@ public sealed class NerdcraftGame : IAsyncDisposable
 
         _screenSize = input.ScreenSize;
         _pointer = input.Pointer;
+
+        // HUD timers use real time, so they keep running while the simulation is paused or clamped.
+        _interactor.UpdateHover(uiDeltaSeconds);
 
         if (input.TogglePause)
         {
@@ -175,7 +191,7 @@ public sealed class NerdcraftGame : IAsyncDisposable
         }
 
         renderer.EndFrame(
-            Hud.Layout(_screenSize, _interactor.Inventory, crosshair: !IsPaused),
+            Hud.Layout(_screenSize, _interactor.Inventory, crosshair: !IsPaused, _interactor.HoverText, _interactor.HoverTimer),
             _showDebug ? new DebugOverlay(_player.EyePosition, stats) : null,
             IsPaused ? PauseMenu.Layout(_screenSize, _pointer) : null);
         StreamingMetrics.RecordElapsed(DrawTime, drawStarted);

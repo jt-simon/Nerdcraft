@@ -4,7 +4,7 @@ using Nerdcraft.Domain.Blocks;
 
 namespace Nerdcraft.Application.Rendering;
 
-/// <summary>Maps block types to display colors, keeping color choices out of the domain.</summary>
+/// <summary>Maps block types to display colors and names, keeping presentation choices out of the domain.</summary>
 public static class BlockPalette
 {
     private static readonly Color Missing = new(255, 0, 255);
@@ -57,4 +57,53 @@ public static class BlockPalette
 
     /// <summary>True when <paramref name="block"/> is drawn see-through (water), so it goes in the translucent mesh and does not hide faces behind it.</summary>
     public static bool IsTranslucent(BlockId block) => block == BlockTypes.Water;
+
+    /// <summary>
+    /// The display name for <paramref name="block"/>, or <see langword="null"/> for air and unknown types.
+    /// Used for hotbar hover text.
+    /// </summary>
+    public static string? GetDisplayName(BlockId block)
+    {
+        if (block == BlockTypes.Stone)
+        {
+            return "Stone";
+        }
+
+        if (block == BlockTypes.Dirt)
+        {
+            return "Dirt";
+        }
+
+        if (block == BlockTypes.Grass)
+        {
+            return "Grass";
+        }
+
+        if (block == BlockTypes.Bedrock)
+        {
+            return "Bedrock";
+        }
+
+        if (block == BlockTypes.Sand)
+        {
+            return "Sand";
+        }
+
+        if (block == BlockTypes.Gravel)
+        {
+            return "Gravel";
+        }
+
+        if (block == BlockTypes.Snow)
+        {
+            return "Snow";
+        }
+
+        if (block == BlockTypes.Water)
+        {
+            return "Water";
+        }
+
+        return null;
+    }
 }
