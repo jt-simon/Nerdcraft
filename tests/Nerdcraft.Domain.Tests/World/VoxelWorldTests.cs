@@ -193,4 +193,52 @@ public class VoxelWorldTests
 
         Assert.Equal(before + 1, first.Version);
     }
+
+    [Fact]
+    public void SetBlock_ChangedBlock_MarksOnlyThatChunkModified()
+    {
+        ChunkPosition edited = new(0, 0, 0);
+        ChunkPosition neighbor = new(1, 0, 0);
+        VoxelWorld world = WorldWith(edited, neighbor);
+
+        world.SetBlock(new BlockPosition(Chunk.Mask, 1, 1), BlockTypes.Stone);
+
+        Assert.Equal([edited], world.ModifiedChunks);
+    }
+
+    [Fact]
+    public void SetBlock_SameBlock_DoesNotMarkModified()
+    {
+        VoxelWorld world = WorldWith(new ChunkPosition(0, 0, 0));
+
+        world.SetBlock(new BlockPosition(1, 1, 1), BlockId.Air);
+
+        Assert.Empty(world.ModifiedChunks);
+    }
+
+    [Fact]
+    public void MarkSaved_ModifiedChunk_ClearsTheMarkUntilTheNextEdit()
+    {
+        ChunkPosition position = new(0, 0, 0);
+        VoxelWorld world = WorldWith(position);
+        world.SetBlock(new BlockPosition(1, 1, 1), BlockTypes.Stone);
+
+        world.MarkSaved(position);
+        Assert.Empty(world.ModifiedChunks);
+
+        world.SetBlock(new BlockPosition(1, 1, 1), BlockTypes.Dirt);
+        Assert.Equal([position], world.ModifiedChunks);
+    }
+
+    [Fact]
+    public void UnloadChunk_ModifiedChunk_ClearsTheMark()
+    {
+        ChunkPosition position = new(0, 0, 0);
+        VoxelWorld world = WorldWith(position);
+        world.SetBlock(new BlockPosition(1, 1, 1), BlockTypes.Stone);
+
+        world.UnloadChunk(position);
+
+        Assert.Empty(world.ModifiedChunks);
+    }
 }

@@ -3,6 +3,7 @@
 using System.Numerics;
 
 using Nerdcraft.Application.Meshing;
+using Nerdcraft.Application.Ports;
 using Nerdcraft.Application.Rendering;
 using Nerdcraft.Application.Streaming;
 using Nerdcraft.Application.Tests.Support;
@@ -58,6 +59,26 @@ public class ChunkStreamerTests
         Assert.True(world.IsLoaded(new ChunkPosition(0, 0, 0)));
         Assert.False(world.IsLoaded(new ChunkPosition(0, 1, 0)));
         Assert.False(world.IsLoaded(new ChunkPosition(0, -2, 0)));
+    }
+
+    [Fact]
+    public void Update_EditedChunkUnloadedAndReloaded_KeepsEdit()
+    {
+        InMemoryChunkStore store = new();
+        VoxelWorld world = new();
+        ChunkStreamer streamer = new(world, new InlineChunkWorkQueue(new HalfSlabGenerator(), new CulledChunkMesher(), store), _settings, store);
+        streamer.Update(Camera);
+        streamer.Update(Camera);
+        BlockPosition edit = new(1, Chunk.Size - 1, 1); // Air in the half slab.
+        Assert.True(world.SetBlock(edit, BlockTypes.Gravel));
+
+        Vector3 far = new(10 * Chunk.Size, 4f, 8f);
+        streamer.Update(far);
+        Assert.False(world.IsLoaded(new ChunkPosition(0, 0, 0)));
+        streamer.Update(Camera);
+        streamer.Update(Camera);
+
+        Assert.Equal(BlockTypes.Gravel, world.GetBlock(edit));
     }
 
     [Fact]

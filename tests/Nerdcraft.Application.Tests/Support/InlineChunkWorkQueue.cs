@@ -3,6 +3,7 @@
 using System.Buffers;
 
 using Nerdcraft.Application.Meshing;
+using Nerdcraft.Application.Ports;
 using Nerdcraft.Application.Streaming;
 using Nerdcraft.Domain.Blocks;
 using Nerdcraft.Domain.World;
@@ -11,7 +12,7 @@ using Nerdcraft.Domain.World.Generation;
 namespace Nerdcraft.Application.Tests.Support;
 
 /// <summary>Runs work synchronously at request time, making streamer behavior deterministic.</summary>
-public sealed class InlineChunkWorkQueue(ITerrainGenerator generator, IChunkMesher mesher) : IChunkWorkQueue
+public sealed class InlineChunkWorkQueue(ITerrainGenerator generator, IChunkMesher mesher, IChunkStore? store = null) : IChunkWorkQueue
 {
     private readonly Queue<GeneratedChunk> _generated = [];
     private readonly Queue<MeshedChunk> _meshed = [];
@@ -30,7 +31,18 @@ public sealed class InlineChunkWorkQueue(ITerrainGenerator generator, IChunkMesh
         {
             ChunkPosition position = new(chunkX, y, chunkZ);
             BlockId[] blocks = ArrayPool<BlockId>.Shared.Rent(Chunk.Volume);
-            generator.Generate(position, blocks.AsSpan(0, Chunk.Volume));
+            bool[] found = new bool[1];
+            store?.ReadColumn(chunkX, chunkZ, y, y, blocks.AsSpan(0, Chunk.Volume), found, CancellationToken.None);
+            if (!found[0])
+            {
+                generator.Generate(position, blocks.AsSpan(0, Chunk.Volume));
+                if (store is not null)
+                {
+                    // The fakes complete synchronously, so this queue can stay synchronous too.
+                    Assert.True(store.SaveGeneratedAsync(position, blocks.AsMemory(0, Chunk.Volume), CancellationToken.None).IsCompletedSuccessfully);
+                }
+            }
+
             _generated.Enqueue(new GeneratedChunk(position, blocks));
         }
 

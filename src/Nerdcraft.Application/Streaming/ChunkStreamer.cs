@@ -20,7 +20,8 @@ namespace Nerdcraft.Application.Streaming;
 /// <param name="world">The world to fill with generated chunks.</param>
 /// <param name="queue">Source of background generation and meshing.</param>
 /// <param name="settings">Supplies render distance, world bounds and the per-frame budgets for uploads, chunk installs and mesh requests.</param>
-public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameSettings settings)
+/// <param name="store">Optional storage that receives edited chunks when they unload and on <see cref="SaveModified"/>.</param>
+public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameSettings settings, IChunkStore? store = null)
 {
     // Chunk neighbor offsets in ChunkFace order; face ^ 1 is the opposite direction.
     private static readonly (int Dx, int Dy, int Dz)[] FaceDirections = [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)];
@@ -39,6 +40,7 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
     private readonly Queue<WalkStep> _walkQueue = new();
     private int _drawFrame;
     private readonly List<ChunkPosition> _unloadScratch = [];
+    private readonly List<ChunkPosition> _saveScratch = [];
     private readonly (int Dx, int Dz)[] _loadOffsets = BuildLoadOffsets(settings.RenderDistance);
     private (int X, int Z)? _lastCameraChunk;
 
@@ -342,17 +344,55 @@ public sealed class ChunkStreamer(VoxelWorld world, IChunkWorkQueue queue, GameS
             }
         }
 
-        foreach (ChunkPosition position in _unloadScratch)
+        try
         {
-            if (_entries.Remove(position, out Entry? entry))
+            foreach (ChunkPosition position in _unloadScratch)
             {
-                ReleaseLater(entry);
-            }
+                // Saved first: if the store fails, the chunk and its entry are both still there.
+                SaveIfModified(position);
+                if (_entries.Remove(position, out Entry? entry))
+                {
+                    ReleaseLater(entry);
+                }
 
-            world.UnloadChunk(position);
+                world.UnloadChunk(position);
+            }
+        }
+        finally
+        {
+            _unloadScratch.Clear();
+        }
+    }
+
+    /// <summary>
+    /// Saves every edited chunk to the store and marks it saved, so each edit is written once. Does nothing without a store.
+    /// Only copies the blocks and queues them, so it is cheap enough to call from the frame loop.
+    /// </summary>
+    public void SaveModified()
+    {
+        if (store is null || world.ModifiedChunks.Count == 0)
+        {
+            return;
         }
 
-        _unloadScratch.Clear();
+        _saveScratch.AddRange(world.ModifiedChunks);
+        foreach (ChunkPosition position in _saveScratch)
+        {
+            SaveIfModified(position);
+        }
+
+        _saveScratch.Clear();
+    }
+
+    private void SaveIfModified(ChunkPosition position)
+    {
+        if (store is not null
+            && world.ModifiedChunks.Contains(position)
+            && world.TryGetChunk(position, out ChunkView chunk))
+        {
+            store.Save(position, chunk.Blocks);
+            world.MarkSaved(position);
+        }
     }
 
     private void InstallGeneratedChunks()

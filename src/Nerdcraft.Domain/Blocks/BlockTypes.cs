@@ -2,7 +2,10 @@
 
 namespace Nerdcraft.Domain.Blocks;
 
-/// <summary>The built-in block types.</summary>
+/// <summary>
+/// The built-in block types. The numeric ids are part of the saved world format: never renumber or reuse one,
+/// only add new ids.
+/// </summary>
 public static class BlockTypes
 {
     /// <summary>Empty space; same as <see cref="BlockId.Air"/>.</summary>

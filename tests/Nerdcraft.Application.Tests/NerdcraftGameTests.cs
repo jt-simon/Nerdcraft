@@ -4,7 +4,9 @@ using System.Numerics;
 
 using Nerdcraft.Application.Input;
 using Nerdcraft.Application.Meshing;
+using Nerdcraft.Application.Ports;
 using Nerdcraft.Application.Rendering;
+using Nerdcraft.Application.Streaming;
 using Nerdcraft.Application.Tests.Support;
 using Nerdcraft.Application.Ui;
 using Nerdcraft.Domain.Blocks;
@@ -33,6 +35,7 @@ public class NerdcraftGameTests
         nameof(GameSettings.MaxChunkInstallsPerFrame),
         nameof(GameSettings.MaxMeshRequestsPerFrame),
         nameof(GameSettings.FovYDegrees),
+        nameof(GameSettings.AutosaveSeconds),
     ];
 
     [Theory]
@@ -47,6 +50,54 @@ public class NerdcraftGameTests
         InlineChunkWorkQueue queue = new(new HalfSlabGenerator(), new CulledChunkMesher());
 
         Assert.Throws<ArgumentOutOfRangeException>(() => new NerdcraftGame(Invalid(settingName), queue, new VoxelWorld()));
+    }
+
+    [Fact]
+    public async Task DisposeAsync_ModifiedChunks_AreSaved()
+    {
+        InMemoryChunkStore store = new();
+        ChunkPosition position = new(0, 0, 0);
+        VoxelWorld world = TestWorlds.WithEmptyChunks(position);
+        NerdcraftGame game = new(new GameSettings { RenderDistance = 0, Bounds = TestWorlds.OneRow }, new InlineChunkWorkQueue(new HalfSlabGenerator(), new CulledChunkMesher(), store), world, store: store);
+        world.SetBlock(new BlockPosition(1, 1, 1), BlockTypes.Stone);
+
+        await game.DisposeAsync();
+
+        Assert.Equal(BlockTypes.Stone, store.Get(position)?[Chunk.Index(1, 1, 1)]);
+    }
+
+    [Fact]
+    public async Task DisposeAsync_StoreFails_StillDisposesTheWorkQueue()
+    {
+        VoxelWorld world = TestWorlds.WithEmptyChunks(new ChunkPosition(0, 0, 0));
+        DisposableQueue queue = new();
+        NerdcraftGame game = new(new GameSettings { RenderDistance = 0, Bounds = TestWorlds.OneRow }, queue, world, store: new ThrowingStore());
+        world.SetBlock(new BlockPosition(1, 1, 1), BlockTypes.Stone);
+
+        await Assert.ThrowsAsync<IOException>(async () => await game.DisposeAsync());
+
+        Assert.True(queue.Disposed);
+    }
+
+    [Fact]
+    public async Task Update_AutosaveIntervalElapsed_SavesModifiedChunksOnce()
+    {
+        InMemoryChunkStore store = new();
+        ChunkPosition position = new(0, 0, 0);
+        VoxelWorld world = new();
+        GameSettings settings = new() { RenderDistance = 0, Bounds = TestWorlds.OneRow, AutosaveSeconds = 5f };
+        NerdcraftGame game = new(settings, new InlineChunkWorkQueue(new HalfSlabGenerator(), new CulledChunkMesher(), store), world, store: store);
+        game.Update(default, 0.1f, 0.1f); // Requests the terrain; the next update installs it.
+        game.Update(default, 0.1f, 0.1f);
+        Assert.True(world.SetBlock(new BlockPosition(1, Chunk.Size - 1, 1), BlockTypes.Stone));
+
+        game.Update(default, 0.1f, 4f);
+        Assert.Equal(0, store.SaveCount(position));
+        game.Update(default, 0.1f, 1.5f);
+        game.Update(default, 0.1f, 6f);
+
+        Assert.Equal(1, store.SaveCount(position));
+        await game.DisposeAsync();
     }
 
     [Fact]
@@ -305,6 +356,40 @@ public class NerdcraftGameTests
         nameof(GameSettings.MaxChunkInstallsPerFrame) => new GameSettings { MaxChunkInstallsPerFrame = 0 },
         nameof(GameSettings.MaxMeshRequestsPerFrame) => new GameSettings { MaxMeshRequestsPerFrame = 0 },
         nameof(GameSettings.FovYDegrees) => new GameSettings { FovYDegrees = 180f },
+        nameof(GameSettings.AutosaveSeconds) => new GameSettings { AutosaveSeconds = 0f },
         _ => throw new ArgumentOutOfRangeException(nameof(settingName)),
     };
+
+    private sealed class ThrowingStore : IChunkStore
+    {
+        public void ReadColumn(int chunkX, int chunkZ, int minChunkY, int maxChunkY, Span<BlockId> blocks, Span<bool> found, CancellationToken cancellationToken)
+            => throw new IOException("The disk is full.");
+
+        public void Save(ChunkPosition position, ReadOnlySpan<BlockId> blocks) => throw new IOException("The disk is full.");
+
+        public ValueTask SaveGeneratedAsync(ChunkPosition position, ReadOnlyMemory<BlockId> blocks, CancellationToken cancellationToken)
+            => throw new IOException("The disk is full.");
+    }
+
+    private sealed class DisposableQueue : IChunkWorkQueue, IAsyncDisposable
+    {
+        private readonly InlineChunkWorkQueue _inner = new(new HalfSlabGenerator(), new CulledChunkMesher());
+
+        public bool Disposed { get; private set; }
+
+        public bool TryRequestGenerateColumn(int chunkX, int chunkZ, int minChunkY, int maxChunkY)
+            => _inner.TryRequestGenerateColumn(chunkX, chunkZ, minChunkY, maxChunkY);
+
+        public bool TryRequestMesh(ChunkSnapshot snapshot) => _inner.TryRequestMesh(snapshot);
+
+        public bool TryTakeGenerated(out GeneratedChunk result) => _inner.TryTakeGenerated(out result);
+
+        public bool TryTakeMeshed(out MeshedChunk result) => _inner.TryTakeMeshed(out result);
+
+        public ValueTask DisposeAsync()
+        {
+            Disposed = true;
+            return ValueTask.CompletedTask;
+        }
+    }
 }

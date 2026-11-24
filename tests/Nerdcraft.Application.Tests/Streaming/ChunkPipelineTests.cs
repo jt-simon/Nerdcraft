@@ -3,6 +3,7 @@
 using System.Buffers;
 
 using Nerdcraft.Application.Meshing;
+using Nerdcraft.Application.Ports;
 using Nerdcraft.Application.Rendering;
 using Nerdcraft.Application.Streaming;
 using Nerdcraft.Application.Tests.Support;
@@ -39,6 +40,66 @@ public class ChunkPipelineTests
         });
 
         Assert.Equal(requested.OrderBy(p => p.X), received.OrderBy(p => p.X));
+    }
+
+    [Fact]
+    public async Task GenerateColumn_WithStore_UsesStoredRowsAndGeneratesAndSavesTheRest()
+    {
+        HeightmapTerrainGenerator generator = new(5, WorldBounds.Default);
+        InMemoryChunkStore store = new();
+        BlockId[] stored = new BlockId[Chunk.Volume];
+        stored[Chunk.Index(2, 3, 4)] = BlockTypes.Gravel;
+        store.Save(new ChunkPosition(3, 0, -2), stored);
+        await using ChunkPipeline pipeline = new(generator, new CulledChunkMesher(), workerCount: 2, WorldBounds.Default, store: store);
+        Assert.True(pipeline.TryRequestGenerateColumn(3, -2, -1, 1));
+
+        Dictionary<ChunkPosition, BlockId[]> received = [];
+        await WaitUntilAsync(() =>
+        {
+            while (pipeline.TryTakeGenerated(out GeneratedChunk chunk))
+            {
+                received[chunk.Position] = chunk.Blocks.AsSpan(0, Chunk.Volume).ToArray();
+                ArrayPool<BlockId>.Shared.Return(chunk.Blocks);
+            }
+
+            return received.Count == 3;
+        });
+
+        Assert.Equal(stored, received[new ChunkPosition(3, 0, -2)]);
+        BlockId[] expected = new BlockId[Chunk.Volume];
+        generator.Generate(new ChunkPosition(3, 1, -2), expected);
+        Assert.Equal(expected, received[new ChunkPosition(3, 1, -2)]);
+        Assert.Equal(expected, store.Get(new ChunkPosition(3, 1, -2)));
+        Assert.NotNull(store.Get(new ChunkPosition(3, -1, -2)));
+        Assert.Equal(0, store.GeneratedCount(new ChunkPosition(3, 0, -2)));
+    }
+
+    [Fact]
+    public async Task GenerateColumn_StoreBusy_PublishesTheRowOnlyAfterTheSaveCompletes()
+    {
+        GatedStore store = new();
+        await using ChunkPipeline pipeline = new(new HeightmapTerrainGenerator(5, WorldBounds.Default), new CulledChunkMesher(), workerCount: 1, WorldBounds.Default, store: store);
+        Assert.True(pipeline.TryRequestGenerateColumn(0, 0, 0, 0));
+        await store.Entered.WaitAsync(Timeout, TestContext.Current.CancellationToken);
+
+        Assert.False(pipeline.TryTakeGenerated(out _));
+
+        store.Release();
+        GeneratedChunk chunk = default;
+        await WaitUntilAsync(() => pipeline.TryTakeGenerated(out chunk));
+        ArrayPool<BlockId>.Shared.Return(chunk.Blocks);
+    }
+
+    [Fact]
+    public async Task DisposeAsync_WorkerWaitingOnTheStore_Completes()
+    {
+        GatedStore store = new();
+        ChunkPipeline pipeline = new(new HeightmapTerrainGenerator(5, WorldBounds.Default), new CulledChunkMesher(), workerCount: 1, WorldBounds.Default, store: store);
+        Assert.True(pipeline.TryRequestGenerateColumn(0, 0, 0, 0));
+        await store.Entered.WaitAsync(Timeout, TestContext.Current.CancellationToken);
+
+        // The store never releases, so this only returns if the worker's token reaches the store call.
+        await pipeline.DisposeAsync().AsTask().WaitAsync(Timeout, TestContext.Current.CancellationToken);
     }
 
     [Fact]
@@ -304,6 +365,28 @@ public class ChunkPipelineTests
         while (!condition())
         {
             await Task.Delay(5, cts.Token);
+        }
+    }
+
+    // A store with nothing stored whose generated saves wait until released, like a writer that has fallen behind.
+    private sealed class GatedStore : IChunkStore
+    {
+        private readonly TaskCompletionSource _entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task Entered => _entered.Task;
+
+        public void Release() => _release.TrySetResult();
+
+        public void ReadColumn(int chunkX, int chunkZ, int minChunkY, int maxChunkY, Span<BlockId> blocks, Span<bool> found, CancellationToken cancellationToken)
+            => found.Clear();
+
+        public void Save(ChunkPosition position, ReadOnlySpan<BlockId> blocks) => throw new NotSupportedException();
+
+        public async ValueTask SaveGeneratedAsync(ChunkPosition position, ReadOnlyMemory<BlockId> blocks, CancellationToken cancellationToken)
+        {
+            _entered.TrySetResult();
+            await _release.Task.WaitAsync(cancellationToken);
         }
     }
 

@@ -8,8 +8,9 @@ custom renderer later) without touching game code.
 Dependencies point inward; project references enforce it.
 
 ```
-Nerdcraft.Desktop            composition root (the only place a renderer meets the game)
+Nerdcraft.Desktop            composition root (the only place a renderer or a store meets the game)
   -> Nerdcraft.Rendering.Raylib   adapter: IRenderer + input + window for raylib
+  -> Nerdcraft.Persistence.Sqlite adapter: IChunkStore on a SQLite world file (the only project that uses SQLite or zstd)
   -> Nerdcraft.Application        use cases and ports
        -> Nerdcraft.Domain        blocks, chunks, world, terrain generation (no dependencies)
 ```
@@ -53,8 +54,8 @@ replace air or water; it needs a solid neighbor; it cannot overlap an entity.
 `Inventory` (a 9-slot hotbar, stacks of 64) is per-player Domain state. `BlockInteractor` in Application owns the local
 player's inventory, reads `InputState`, builds the action from `LocalPlayer.Target()` and applies it; sending the action to a
 server instead would change only that spot. The hotbar is laid out by `Hud.Layout` (like `PauseMenu`) and a renderer draws the
-`HudView` it is handed. `VoxelWorld.SetBlock` marks the chunk and its neighbors dirty, so `ChunkStreamer` remeshes them.
-Edits are not stored apart from the chunk, so they are lost when the chunk unloads.
+`HudView` it is handed. `VoxelWorld.SetBlock` marks the chunk and its neighbors dirty, so `ChunkStreamer` remeshes them, and
+marks the edited chunk as modified so it is saved (see Persistence).
 
 ## Player movement
 
@@ -99,7 +100,8 @@ The rules live in Domain so a future server can run exactly the code a client do
 
 `GameSettings.RenderDistance` is the main knob for weak hardware.
 
-For performance captures, subscribe to the `Nerdcraft.Streaming` and `Nerdcraft.Raylib` .NET meters. Frame duration
+For performance captures, subscribe to the `Nerdcraft.Streaming`, `Nerdcraft.Raylib` and `Nerdcraft.Persistence` .NET meters
+(the last reports the writer's queue depth, batch size and commit time, and the time to read a column). Frame duration
 is measured between consecutive `Update` calls and includes presentation in the Desktop loop. The upload phase
 includes release processing, which also has its own duration and call-count metrics. Raylib reports uploaded bytes
 per upload call. Queue metrics cover results awaiting consumption.
@@ -109,6 +111,64 @@ render distance, and presentation settings. Repeat the same settled view with th
 and flight into new terrain before and after each change. Report cold and warm results separately, including median,
 p95, and p99 frame times and the share of frames over 16.67 ms. Capture CPU phase times, upload bytes, draw and release
 counts, result queue depth and age, and GPU time when available.
+
+## Persistence
+
+`IChunkStore` (Application) is the port: `ReadColumn` for a column of chunks, `Save` for an edited chunk and `SaveGeneratedAsync`
+for fresh terrain. `Nerdcraft.Persistence.Sqlite` implements it; `SqliteWorld.OpenAsync` is called only from `Program.cs`, and the
+host passes `world.Chunks(0)` (dimension 0) to `NerdcraftGame.Create`. A server host would wire the same pipeline and store, and
+clients would never open the file.
+
+- **Every generated chunk is stored.** `ChunkPipeline` reads a column from the store on its worker, generates only the rows
+  that are missing and writes them with `SaveGeneratedAsync`, which never replaces a chunk that is already stored or waiting to be
+  (a late worker cannot overwrite an edit). Stored worlds therefore stay as they were when terrain generation changes, and a
+  server never regenerates what it already made. The block ids in `BlockTypes` are part of the file format: never renumber them.
+- **Edits are saved on the main thread, cheaply.** `VoxelWorld` records which chunks were modified. `ChunkStreamer` saves them
+  when they unload, and `NerdcraftGame` saves all of them every `GameSettings.AutosaveSeconds` (real time, so also while paused)
+  and in `DisposeAsync`. `Save` only copies the blocks and queues them; it never waits for the disk.
+- **One writer, many readers.** `SqliteChunkStore` has a single writer task that commits queued chunks in batches of up to 512
+  per transaction, and encodes them there. Until an edit's `Save` is committed it also sits in an in-memory overlay that reads
+  check first, so a read always sees the latest save. Overlay arrays are never modified once published, so readers copy them
+  outside the lock and the main thread's `Save` never waits behind a worker's read. Reads use pooled read-only connections,
+  which WAL mode lets run beside the writer. A writer failure is rethrown from the next save, read or dispose, like a pipeline
+  worker's, and wakes any worker waiting for room.
+- **Backpressure and cancellation.** Microsoft.Data.Sqlite's async methods run synchronously, so SQLite calls stay synchronous on
+  background threads and `async` is used where something really waits. `SaveGeneratedAsync` waits (on a `SemaphoreSlim`, so no
+  thread is blocked) when 1024 generated chunks, about 8 MB, are already queued; workers therefore generate no faster than the
+  disk can take, and a worker stuck waiting is released by the pipeline's cancellation token at shutdown. Edits are not
+  limited: they come from the player and must never block the main thread. Tokens reach `ReadColumn`, `SaveGeneratedAsync`,
+  the backup and `SqliteWorld.OpenAsync`; they are checked between steps, not inside a running statement. `Save` takes none (it
+  only enqueues), `ITerrainGenerator` takes none (pure CPU, checked between rows by the pipeline), and `DisposeAsync` cannot,
+  because cancelling the writer's last commits would lose saves.
+- **Shutdown order:** dispose the game first (it saves its edits and stops the workers), then the `SqliteWorld` (it commits the
+  queue, gives a running backup 2 seconds to finish and then abandons it, empties the log and marks the shutdown clean).
+
+The world directory holds `world.db`, `backups/` and `session.lock`. The lock is held while the world is open, so a second
+process fails to open it instead of corrupting it. `world.db` has two tables:
+
+- `world_meta`: seed, height range, generator name and version, creation and backup times, and a `clean_shutdown` flag, so a world
+  reopens with its own seed and bounds. `PRAGMA application_id` marks the file and `user_version` is the schema version;
+  a file from a newer version, or one that is not a world, is refused untouched.
+- `chunks (key INTEGER PRIMARY KEY, data BLOB)`: a rowid table, not `WITHOUT ROWID`, because compressed chunks are often larger
+  than the roughly 200 bytes a `WITHOUT ROWID` row suits. The key packs dimension (8 bits), X (22), Z (22) and Y (12) in that
+  order (`ChunkKey`), so a whole column is one key range and `ReadColumn` is one range scan. Coordinates outside about
+  +/-2 million chunks horizontally or +/-2048 chunks vertically throw.
+- Each blob (`ChunkCodec`) is a format byte, a compression byte and a palette of the block ids present, then a bit-packed index per
+  block, compressed with zstd when that is smaller. A chunk of one block type is a few bytes.
+
+Upkeep is automatic (`SqliteMaintenance`, on the writer or in the background, timed by an injected `TimeProvider`):
+
+- After an unclean shutdown the next open runs `PRAGMA quick_check` and refuses a damaged database, naming the newest backup.
+- When the last backup is 24 hours old, `VACUUM INTO` copies the database in the background while the game keeps writing.
+  It writes to a `.tmp` name and renames when done, so an abandoned backup leaves no partial file (the next backup deletes the
+  leftover). The newest three copies are kept, and the time is recorded only on success, so an abandoned one is retried next launch.
+- When the writer has been idle for 2 seconds, at most every 5 minutes, it moves the log into the database without blocking and
+  returns a bounded number of free pages to the file system (`auto_vacuum = INCREMENTAL`).
+- On dispose it returns free pages, empties the log (`wal_checkpoint(TRUNCATE)`) and marks the shutdown clean, unless a column
+  read failed (unreadable blob or damaged page), in which case it stays unclean so the next open runs the integrity check. A read
+  failure is never papered over by regenerating the chunk, since that would discard the player's edits; it is reported as an
+  `InvalidDataException` (or `IOException` for other database errors) naming the chunk or column. `Program.cs` reports any
+  failure of the game loop or of shutdown on the console and in `crash.log`, then still saves and closes the world.
 
 ## Third-party code
 

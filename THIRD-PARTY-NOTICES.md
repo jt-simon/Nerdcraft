@@ -33,3 +33,15 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## Microsoft.Data.Sqlite, SQLitePCLRaw and SQLite
+
+- Source: [Microsoft.Data.Sqlite](https://www.nuget.org/packages/Microsoft.Data.Sqlite) (MIT, Microsoft), which brings in [SQLitePCLRaw](https://github.com/ericsink/SQLitePCL.raw) (Apache-2.0, Eric Sink) and the native [SQLite](https://www.sqlite.org/) library (public domain)
+- Location: NuGet packages used by `src/Nerdcraft.Persistence.Sqlite`; not copied into this repository
+- Use: stores the saved world
+
+## ZstdSharp.Port
+
+- Source: [ZstdSharp.Port](https://github.com/oleg-st/ZstdSharp) (MIT, Oleg Stepanischev), a C# port of [Zstandard](https://github.com/facebook/zstd) (BSD-3-Clause, Meta)
+- Location: NuGet package used by `src/Nerdcraft.Persistence.Sqlite`; not copied into this repository
+- Use: compresses saved chunks

@@ -11,6 +11,7 @@ namespace Nerdcraft.Domain.World;
 public sealed class VoxelWorld
 {
     private readonly Dictionary<ChunkPosition, Chunk> _chunks = [];
+    private readonly HashSet<ChunkPosition> _modified = [];
 
     // Starts every new chunk above the version any unloaded chunk reached, so a version number identifies one
     // load of a chunk and results from an earlier load can never be mistaken for the current one.
@@ -26,6 +27,15 @@ public sealed class VoxelWorld
 
     /// <summary>Positions of every chunk currently loaded. A live view: do not load or unload chunks while enumerating.</summary>
     public IReadOnlyCollection<ChunkPosition> LoadedChunks => _chunks.Keys;
+
+    /// <summary>
+    /// Positions of loaded chunks whose blocks changed through <see cref="SetBlock"/> since they were loaded or last passed to
+    /// <see cref="MarkSaved"/>. A live view: do not edit, load, unload or mark chunks while enumerating.
+    /// </summary>
+    public IReadOnlySet<ChunkPosition> ModifiedChunks => _modified;
+
+    /// <summary>Clears the modified mark of <paramref name="position"/> once its blocks have been stored. Does nothing if it is not marked.</summary>
+    public void MarkSaved(ChunkPosition position) => _modified.Remove(position);
 
     /// <summary>Gets a read-only view of the live chunk at <paramref name="position"/>.</summary>
     /// <returns>True when the chunk is loaded. The view is only valid on success.</returns>
@@ -77,6 +87,7 @@ public sealed class VoxelWorld
         }
 
         Revision++;
+        _modified.Add(chunkPosition);
 
         // A block on a chunk border changes the padded view of every neighbor it touches: the face neighbor on each
         // side it lies against, plus the edge and corner neighbors when it lies against more than one.
@@ -107,6 +118,7 @@ public sealed class VoxelWorld
         }
 
         chunk.Load(blocks);
+        _modified.Remove(position);
         Revision++;
         TouchNeighbors(position, -1, 1, -1, 1, -1, 1);
     }
@@ -120,6 +132,7 @@ public sealed class VoxelWorld
         }
 
         _versionFloor = Math.Max(_versionFloor, chunk.Version + 1);
+        _modified.Remove(position);
         Revision++;
         TouchNeighbors(position, -1, 1, -1, 1, -1, 1);
         return true;

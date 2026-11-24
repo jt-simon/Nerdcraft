@@ -34,8 +34,9 @@ public class DependencyTests
         {
             [ProjectPath("Nerdcraft.Domain")] = ([], []),
             [ProjectPath("Nerdcraft.Application")] = ([ProjectPath("Nerdcraft.Domain")], []),
+            [ProjectPath("Nerdcraft.Persistence.Sqlite")] = ([ProjectPath("Nerdcraft.Application")], ["Microsoft.Data.Sqlite", "ZstdSharp.Port"]),
             [ProjectPath("Nerdcraft.Rendering.Raylib")] = ([ProjectPath("Nerdcraft.Application")], ["Raylib-cs"]),
-            [ProjectPath("Nerdcraft.Desktop")] = ([ProjectPath("Nerdcraft.Application"), ProjectPath("Nerdcraft.Rendering.Raylib")], []),
+            [ProjectPath("Nerdcraft.Desktop")] = ([ProjectPath("Nerdcraft.Application"), ProjectPath("Nerdcraft.Persistence.Sqlite"), ProjectPath("Nerdcraft.Rendering.Raylib")], []),
         };
 
         string[] projects = Directory.GetFiles(sourceDirectory, "*.csproj", SearchOption.AllDirectories)
