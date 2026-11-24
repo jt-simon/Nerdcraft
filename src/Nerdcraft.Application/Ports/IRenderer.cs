@@ -52,8 +52,9 @@ public interface IRenderer
     /// <summary>Finishes the frame and presents it.</summary>
     /// <param name="hud">
     /// When set, draws the heads-up display over the scene and under the overlay and the menu: the crosshair at the center
-    /// of the screen when <see cref="HudView.Crosshair"/> is set, and each hotbar slot at its pixel bounds. When
-    /// <see langword="null"/>, draws no HUD.
+    /// of the screen when <see cref="HudView.Crosshair"/> is set, each hotbar slot at its pixel bounds, and optional hover
+    /// text above the selected slot when <see cref="HudView.HoverText"/> is set with opacity <see cref="HudView.HoverOpacity"/>.
+    /// When <see langword="null"/>, draws no HUD.
     /// </param>
     /// <param name="debug">
     /// When set, draws the debug overlay (FPS, the camera position and the draw statistics); when

@@ -207,6 +207,31 @@ public sealed unsafe class RaylibRenderer : IRenderer, IDisposable
                 Raylib_cs.Raylib.DrawText(count, x + width - Raylib_cs.Raylib.MeasureText(count, 20) - 3, y + height - 22, 20, Color.White);
             }
         }
+
+        if (hud.HoverText is { } hoverText && hud.HoverOpacity > 0f)
+        {
+            foreach (HotbarSlotView slot in hud.Hotbar)
+            {
+                if (slot.Selected)
+                {
+                    DrawHoverText(hoverText, slot.Bounds, hud.HoverOpacity);
+                    break;
+                }
+            }
+        }
+    }
+
+    // Centered above the slot, with a one-pixel black shadow.
+    private static void DrawHoverText(string text, UiRect slot, float opacity)
+    {
+        const int FontSize = 24;
+        const int Gap = 4;
+        int x = (int)(slot.X + (slot.Width / 2f)) - (Raylib_cs.Raylib.MeasureText(text, FontSize) / 2);
+        int y = (int)slot.Y - FontSize - Gap;
+        byte alpha = (byte)MathF.Round(opacity * 255f);
+
+        Raylib_cs.Raylib.DrawText(text, x + 1, y + 1, FontSize, new Color((byte)0, (byte)0, (byte)0, alpha));
+        Raylib_cs.Raylib.DrawText(text, x, y, FontSize, new Color((byte)255, (byte)255, (byte)255, alpha));
     }
 
     /// <summary>Unloads every mesh that has not been released, and the shared material.</summary>

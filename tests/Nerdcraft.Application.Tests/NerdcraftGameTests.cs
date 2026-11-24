@@ -202,6 +202,37 @@ public class NerdcraftGameTests
     }
 
     [Fact]
+    public void Update_PausedHoverText_FadesAndExpiresByUiTime()
+    {
+        (NerdcraftGame game, FakeRenderer renderer) = CreateTargetingGame();
+        RenderFrames(game, renderer, LookDown);
+        game.Update(new InputState(Vector2.Zero, Vector2.Zero, false, false, Break: true), 0f);
+        game.Update(new InputState(Vector2.Zero, Vector2.Zero, false, false, SelectSlot: 1, ScreenSize: Screen), 0f);
+        game.Update(new InputState(Vector2.Zero, Vector2.Zero, false, false, SelectSlot: 0, ScreenSize: Screen), 0f);
+        game.Update(TogglePause, 0f);
+        Assert.True(game.IsPaused);
+
+        // The simulation step is clamped to 0.1 s, but the HUD has really been up for 2 s: the end of full opacity.
+        game.Update(default, 0.1f, 2f);
+        game.Render(renderer);
+        HudView hud = renderer.Huds[^1]!.Value;
+        Assert.Equal("Stone", hud.HoverText);
+        Assert.Equal(1f, hud.HoverOpacity, 0.001f);
+
+        // 0.6 s later only 0.4 s of the 1 s fade remains.
+        game.Update(default, 0.1f, 0.6f);
+        game.Render(renderer);
+        hud = renderer.Huds[^1]!.Value;
+        Assert.Equal("Stone", hud.HoverText);
+        Assert.Equal(0.4f, hud.HoverOpacity, 0.001f);
+
+        // The simulation stands still; real time alone expires the text.
+        game.Update(default, 0f, 0.5f);
+        game.Render(renderer);
+        Assert.Null(renderer.Huds[^1]!.Value.HoverText);
+    }
+
+    [Fact]
     public void Update_ResumeClickStillHeld_DoesNotBreakBlock()
     {
         VoxelWorld world = new();

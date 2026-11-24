@@ -5,6 +5,7 @@ using System.Numerics;
 using Nerdcraft.Application.Input;
 using Nerdcraft.Application.Player;
 using Nerdcraft.Application.Tests.Support;
+using Nerdcraft.Application.Ui;
 using Nerdcraft.Domain.Blocks;
 using Nerdcraft.Domain.Entities;
 using Nerdcraft.Domain.Items;
@@ -88,5 +89,50 @@ public class BlockInteractorTests
         Step(interactor, player, new InputState(Vector2.Zero, Vector2.Zero, false, false, HotbarScroll: 1), 0f);
 
         Assert.Equal(5, interactor.Inventory.SelectedSlot);
+    }
+
+    [Fact]
+    public void Update_ReselectingSameSlot_DoesNotStartHoverText()
+    {
+        (_, LocalPlayer player, BlockInteractor interactor) = Create();
+        interactor.Inventory.TryAdd(BlockTypes.Stone);
+
+        Step(interactor, player, new InputState(Vector2.Zero, Vector2.Zero, false, false, SelectSlot: 0), 0f);
+
+        Assert.Equal(0f, interactor.HoverTimer);
+        Assert.Null(interactor.HoverText);
+    }
+
+    [Fact]
+    public void Update_SelectEmptySlotThenBreakIntoIt_DoesNotShowHoverText()
+    {
+        (_, LocalPlayer player, BlockInteractor interactor) = Create();
+
+        Step(interactor, player, new InputState(Vector2.Zero, Vector2.Zero, false, false, SelectSlot: 3), 0f);
+        Step(interactor, player, new InputState(Vector2.Zero, Vector2.Zero, false, false, SelectSlot: 0), 0f);
+        Step(interactor, player, new InputState(Vector2.Zero, Vector2.Zero, false, false, SelectSlot: 3), 0f);
+        interactor.Inventory.TryAdd(BlockTypes.Stone);
+
+        Assert.Equal(0f, interactor.HoverTimer);
+        Assert.Null(interactor.HoverText);
+    }
+
+    [Fact]
+    public void Update_PlaceLastBlockWhileHoverVisible_ShowsEmptySlotWithoutLabel()
+    {
+        (_, LocalPlayer player, BlockInteractor interactor) = Create();
+        interactor.Inventory.TryAdd(BlockTypes.Sand);
+        Step(interactor, player, new InputState(Vector2.Zero, Vector2.Zero, false, false, SelectSlot: 1), 0f);
+        Step(interactor, player, new InputState(Vector2.Zero, Vector2.Zero, false, false, SelectSlot: 0), 0f);
+        Assert.Equal("Sand", interactor.HoverText);
+
+        // Placing the only sand empties the slot while the label timer is still running.
+        Step(interactor, player, new InputState(Vector2.Zero, Vector2.Zero, false, false, Place: true), 0f);
+
+        HudView hud = Hud.Layout(new Vector2(800f, 600f), interactor.Inventory, crosshair: true, interactor.HoverText, interactor.HoverTimer);
+        Assert.True(interactor.HoverTimer > 0f);
+        Assert.Null(hud.HoverText);
+        Assert.Null(hud.Hotbar[0].Swatch);
+        Assert.Equal(0, hud.Hotbar[0].Count);
     }
 }

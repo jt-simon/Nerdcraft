@@ -37,6 +37,11 @@ Targeting is decided in Application (`LocalPlayer.Target` casts from the eye thr
 5 blocks). The renderer only draws what it is handed: `IRenderer.DrawBoxOutline` for the targeted block and the
 `HudView` (crosshair and hotbar) given to `EndFrame`.
 
+The host supplies simulation and elapsed UI deltas to `NerdcraftGame.Update`. The Desktop host caps the
+simulation delta to limit gameplay steps after a hitch and passes uncapped frame time as the UI delta.
+Application advances HUD timers that continue during pause using the UI delta and computes label visibility
+and opacity. Renderers draw the resulting `HudView`.
+
 ## Block interaction
 
 Breaking and placing follow the same shape as movement, so a server can reuse the rules. `BlockAction` is a small value
