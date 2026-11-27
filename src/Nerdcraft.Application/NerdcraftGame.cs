@@ -41,6 +41,7 @@ public sealed class NerdcraftGame : IAsyncDisposable
     private readonly ChunkStreamer _streamer;
     private readonly IAsyncDisposable? _workQueue;
     private readonly float _farPlane;
+    private readonly DistanceFog _distanceFog;
     private bool _showDebug;
     private int _ignoreLookFrames;
     private Vector2 _screenSize;
@@ -68,6 +69,11 @@ public sealed class NerdcraftGame : IAsyncDisposable
             PlayerState.Spawn(new Vector3(8.5f, spawnHeight, 8.5f)), world, settings.Bounds, new PlayerAbilities(CanFly: true, CanNoclip: true));
         _interactor = new BlockInteractor(world);
         _farPlane = (settings.RenderDistance + 1) * Chunk.Size * 1.5f;
+
+        // Chunk columns are centered on the camera's chunk, so leave room for movement within it.
+        // At small radii keep enough clear space to interact with nearby blocks.
+        float fogEnd = MathF.Max(0.5f + (0.25f * settings.RenderDistance), settings.RenderDistance - 1.5f) * Chunk.Size;
+        _distanceFog = new DistanceFog(0.75f * fogEnd, fogEnd);
     }
 
     /// <summary>
@@ -202,7 +208,7 @@ public sealed class NerdcraftGame : IAsyncDisposable
         CameraView view = _player.ToView(_settings.FovYDegrees, nearPlane: 0.1f, _farPlane);
         Frustum frustum = Frustum.FromViewProjection(view.CreateViewProjection(renderer.AspectRatio));
 
-        renderer.BeginFrame(view, SkyColor);
+        renderer.BeginFrame(view, SkyColor, _distanceFog);
         DrawStats stats = _streamer.Draw(renderer, frustum, view.Position, countMeshedChunks: _showDebug);
         if (!IsPaused && _player.Target() is { } hit)
         {

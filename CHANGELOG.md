@@ -10,6 +10,7 @@ contain breaking changes.
 
 ### Added
 
+- Distance fog fades terrain and water into the sky. Lower render distances bring the fade closer.
 - Textured blocks. Every block face is drawn with a 16 by 16 texture from the new default texture pack in `assets/texturepacks/default` (grass has its own top, side and bottom), and the hotbar shows the block's texture instead of a flat color. A texture pack is a folder of `textures/<name>.png`; a missing or unreadable file shows as magenta and is reported on standard error. Lighting and ambient occlusion are unchanged.
 - `TextureAtlas`, `UvRect`, `BlockPalette.GetTexture`, `BlockPalette.TextureNames` and `BlockPalette.Atlas` (Application): texture names and the atlas layout shared by the mesher and the renderer. `MeshData.TexCoords`; `MeshData.CopyFrom` takes texture coordinates.
 - Licensing: artwork, textures, documentation and other non-code text are licensed under Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0), see `LICENSE-CC-BY-SA-4.0.txt`. Code stays AGPL-3.0-or-later.

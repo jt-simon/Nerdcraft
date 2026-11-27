@@ -4,6 +4,7 @@ using System.Numerics;
 
 using Nerdcraft.Application.Input;
 using Nerdcraft.Application.Meshing;
+using Nerdcraft.Application.Player;
 using Nerdcraft.Application.Ports;
 using Nerdcraft.Application.Rendering;
 using Nerdcraft.Application.Streaming;
@@ -50,6 +51,24 @@ public class NerdcraftGameTests
         InlineChunkWorkQueue queue = new(new HalfSlabGenerator(), new CulledChunkMesher());
 
         Assert.Throws<ArgumentOutOfRangeException>(() => new NerdcraftGame(Invalid(settingName), queue, new VoxelWorld()));
+    }
+
+    [Theory]
+    [InlineData(0, 6f, 8f)]
+    [InlineData(1, 9f, 12f)]
+    [InlineData(12, 126f, 168f)]
+    public async Task Render_RenderDistanceConfigured_UsesMatchingFogRange(int renderDistance, float startBlocks, float endBlocks)
+    {
+        GameSettings settings = new() { RenderDistance = renderDistance, Bounds = TestWorlds.OneRow };
+        InlineChunkWorkQueue queue = new(new HalfSlabGenerator(), new CulledChunkMesher());
+        await using NerdcraftGame game = new(settings, queue, new VoxelWorld());
+        FakeRenderer renderer = new();
+
+        game.Render(renderer);
+
+        DistanceFog fog = Assert.Single(renderer.FogRanges);
+        Assert.Equal(new DistanceFog(startBlocks, endBlocks), fog);
+        Assert.True(fog.StartBlocks > LocalPlayer.ReachBlocks);
     }
 
     [Fact]
