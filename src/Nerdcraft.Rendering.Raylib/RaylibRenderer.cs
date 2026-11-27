@@ -20,6 +20,48 @@ public sealed unsafe class RaylibRenderer : IRenderer, IDisposable
 {
     private const int TileSize = 16;
 
+    private const string TerrainVertexShader = """
+        #version 330
+        in vec3 vertexPosition;
+        in vec2 vertexTexCoord;
+        in vec4 vertexColor;
+        uniform mat4 mvp;
+        uniform mat4 matModel;
+        uniform vec4 fogParameters;
+        out vec2 fragTexCoord;
+        out vec4 fragColor;
+        out vec2 cameraOffset;
+
+        void main()
+        {
+            vec4 position = vec4(vertexPosition, 1.0);
+            gl_Position = mvp * position;
+            fragTexCoord = vertexTexCoord;
+            fragColor = vertexColor;
+            cameraOffset = (matModel * position).xz - fogParameters.xy;
+        }
+        """;
+
+    private const string TerrainFragmentShader = """
+        #version 330
+        in vec2 fragTexCoord;
+        in vec4 fragColor;
+        in vec2 cameraOffset;
+        uniform sampler2D texture0;
+        uniform vec4 colDiffuse;
+        uniform vec4 fogParameters;
+        uniform vec3 fogColor;
+        out vec4 finalColor;
+
+        void main()
+        {
+            vec4 surface = texture(texture0, fragTexCoord) * colDiffuse * fragColor;
+            float distanceSquared = dot(cameraOffset, cameraOffset);
+            float fog = smoothstep(fogParameters.z, fogParameters.w, distanceSquared);
+            finalColor = vec4(mix(surface.rgb, fogColor, fog), surface.a);
+        }
+        """;
+
     private static readonly Meter Metrics = new("Nerdcraft.Raylib");
     private static readonly Histogram<long> UploadBytes = Metrics.CreateHistogram<long>(
         "nerdcraft.mesh.upload.bytes", "By", "Vertex positions, texture coordinates, colors and indices sent to the GPU; normals are not uploaded");
@@ -28,6 +70,8 @@ public sealed unsafe class RaylibRenderer : IRenderer, IDisposable
     private readonly Material _material = Raylib_cs.Raylib.LoadMaterialDefault();
     private readonly TextureAtlas _atlas = BlockPalette.Atlas;
     private readonly Texture2D _atlasTexture;
+    private readonly int _fogParametersLocation = -1;
+    private readonly int _fogColorLocation;
     private int _nextId;
     private bool _drawingTranslucent;
 
@@ -35,7 +79,9 @@ public sealed unsafe class RaylibRenderer : IRenderer, IDisposable
     /// Builds the texture atlas from a texture pack and makes every block mesh use it. For each name in <see cref="BlockPalette.Atlas"/>
     /// it reads <c>textures/&lt;name&gt;.png</c> from <paramref name="texturePackDirectory"/>, scales it to 16 by 16 pixels if it has another
     /// size, and places it in the tile the atlas assigns. A file that is missing or cannot be read leaves its tile magenta; so do unknown
-    /// names. Each such file is reported on standard error, and one message says so if the pack has no <c>textures</c> folder. Must be called on the thread that owns the window, after the window is created.
+    /// names. Each such file is reported on standard error, and one message says so if the pack has no <c>textures</c> folder.
+    /// Uses the default material shader if the terrain fog shader is unavailable. Must be called on the thread that owns the window,
+    /// after the window is created.
     /// </summary>
     /// <param name="texturePackDirectory">The folder of the pack: the one that contains <c>textures</c>.</param>
     public RaylibRenderer(string texturePackDirectory)
@@ -86,6 +132,25 @@ public sealed unsafe class RaylibRenderer : IRenderer, IDisposable
         // Pixel-sharp, and no mipmaps, which would blend neighboring tiles of the strip.
         Raylib_cs.Raylib.SetTextureFilter(_atlasTexture, TextureFilter.Point);
         Raylib_cs.Raylib.SetMaterialTexture(ref _material, MaterialMapIndex.Albedo, _atlasTexture);
+
+        Shader shader = Raylib_cs.Raylib.LoadShaderFromMemory(TerrainVertexShader, TerrainFragmentShader);
+        // Raylib can return its default shader on failure.
+        if (Raylib_cs.Raylib.IsShaderValid(shader) && shader.Id != Rlgl.GetShaderIdDefault())
+        {
+            int parametersLocation = Raylib_cs.Raylib.GetShaderLocation(shader, "fogParameters");
+            int colorLocation = Raylib_cs.Raylib.GetShaderLocation(shader, "fogColor");
+            if (parametersLocation >= 0 && colorLocation >= 0)
+            {
+                _material.Shader = shader;
+                _fogParametersLocation = parametersLocation;
+                _fogColorLocation = colorLocation;
+                return;
+            }
+
+            Raylib_cs.Raylib.UnloadShader(shader);
+        }
+
+        Console.Error.WriteLine("Terrain fog shader unavailable. Drawing without distance fog.");
     }
 
     /// <inheritdoc/>
@@ -96,7 +161,7 @@ public sealed unsafe class RaylibRenderer : IRenderer, IDisposable
     /// <remarks>
     /// Retains only the index data on the CPU after upload; the vertex data lives on the GPU. Texture coordinates address the atlas
     /// of <see cref="BlockPalette.Atlas"/>; vertex colors tint the texture. Normals are not uploaded:
-    /// the default material's shader does not read them, so they would only cost video memory and upload time.
+    /// the terrain shader does not read them, so they would only cost video memory and upload time.
     /// </remarks>
     public MeshHandle UploadMesh(MeshData data)
     {
@@ -135,13 +200,21 @@ public sealed unsafe class RaylibRenderer : IRenderer, IDisposable
     }
 
     /// <inheritdoc/>
-    public void BeginFrame(CameraView camera, NerdcraftColor clearColor)
+    public void BeginFrame(CameraView camera, NerdcraftColor clearColor, DistanceFog fog)
     {
         Rlgl.SetClipPlanes(camera.NearPlane, camera.FarPlane);
         Raylib_cs.Raylib.BeginDrawing();
         Raylib_cs.Raylib.ClearBackground(new Color(clearColor.R, clearColor.G, clearColor.B, clearColor.A));
         Raylib_cs.Raylib.BeginMode3D(new Camera3D(
             camera.Position, camera.Target, camera.Up, camera.FovYDegrees, CameraProjection.Perspective));
+
+        if (_fogParametersLocation >= 0)
+        {
+            Vector4 fogParameters = new(camera.Position.X, camera.Position.Z, fog.StartBlocks * fog.StartBlocks, fog.EndBlocks * fog.EndBlocks);
+            Vector3 fogColor = new Vector3(clearColor.R, clearColor.G, clearColor.B) / 255f;
+            Raylib_cs.Raylib.SetShaderValue(_material.Shader, _fogParametersLocation, fogParameters, ShaderUniformDataType.Vec4);
+            Raylib_cs.Raylib.SetShaderValue(_material.Shader, _fogColorLocation, fogColor, ShaderUniformDataType.Vec3);
+        }
     }
 
     /// <inheritdoc/>
@@ -306,7 +379,7 @@ public sealed unsafe class RaylibRenderer : IRenderer, IDisposable
         Raylib_cs.Raylib.DrawText(text, x, y, FontSize, new Color((byte)255, (byte)255, (byte)255, alpha));
     }
 
-    /// <summary>Unloads every mesh that has not been released, and the shared material together with the atlas texture it holds.</summary>
+    /// <summary>On the graphics thread, unloads remaining meshes and the shared material, including its atlas texture and any custom shader.</summary>
     public void Dispose()
     {
         foreach (Mesh mesh in _meshes.Values)

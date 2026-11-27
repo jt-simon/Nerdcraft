@@ -10,7 +10,7 @@ namespace Nerdcraft.Application;
 /// </summary>
 public sealed record GameSettings
 {
-    /// <summary>Horizontal radius, in chunks, kept loaded around the camera. At least 0.</summary>
+    /// <summary>Horizontal radius, in chunks, kept loaded around the camera. Also controls the distance fog range. At least 0.</summary>
     public int RenderDistance { get; init; } = 12;
 
     /// <summary>Vertical extent of the world in blocks, with sea level at Y = 0. <c>MaxY</c> must be above <c>MinY</c>.</summary>

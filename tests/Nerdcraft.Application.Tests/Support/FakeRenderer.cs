@@ -51,7 +51,13 @@ public sealed class FakeRenderer : IRenderer
     /// <summary>Direction the camera looked in at each <see cref="BeginFrame"/>.</summary>
     public List<Vector3> CameraForwards { get; } = [];
 
-    public void BeginFrame(CameraView camera, Color clearColor) => CameraForwards.Add(Vector3.Normalize(camera.Target - camera.Position));
+    public List<DistanceFog> FogRanges { get; } = [];
+
+    public void BeginFrame(CameraView camera, Color clearColor, DistanceFog fog)
+    {
+        CameraForwards.Add(Vector3.Normalize(camera.Target - camera.Position));
+        FogRanges.Add(fog);
+    }
 
     public void DrawMesh(MeshHandle handle, Matrix4x4 transform)
     {

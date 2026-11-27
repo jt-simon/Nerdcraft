@@ -23,8 +23,11 @@ public interface IRenderer
     /// <summary>Frees the GPU resources behind <paramref name="handle"/>. The handle must not be used afterwards.</summary>
     void ReleaseMesh(MeshHandle handle);
 
-    /// <summary>Starts a frame: clears the target and sets up the camera. Call once before any <see cref="DrawMesh"/>.</summary>
-    void BeginFrame(CameraView camera, Color clearColor);
+    /// <summary>Starts a frame and sets up the camera and distance fog. Call once before any <see cref="DrawMesh"/>.</summary>
+    /// <param name="camera">The view and clip planes for the frame.</param>
+    /// <param name="clearColor">Color used to clear the target and tint distant world meshes.</param>
+    /// <param name="fog">Horizontal distances from the camera in world blocks at which world meshes start and finish fading toward <paramref name="clearColor"/>.</param>
+    void BeginFrame(CameraView camera, Color clearColor, DistanceFog fog);
 
     /// <summary>Draws an uploaded mesh. Valid only between <see cref="BeginFrame"/> and <see cref="EndFrame"/>.</summary>
     /// <param name="handle">A handle from <see cref="UploadMesh"/>.</param>
